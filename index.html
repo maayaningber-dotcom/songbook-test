@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Songbook - בדיקת embed</title>
+<style>
+  body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0;padding:16px;background:#14161a;color:#e8e8e8}
+  h1{font-size:18px;margin:0 0 4px}
+  .sub{color:#9aa;font-size:13px;margin-bottom:12px}
+  .wrap{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+  .col{flex:1 1 360px;min-width:320px}
+  .card{background:#1d2026;border:1px solid #2b3039;border-radius:10px;padding:12px;margin-bottom:12px}
+  .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0}
+  input,select,button{font:inherit;padding:6px 10px;border-radius:6px;border:1px solid #3a414d;background:#262b33;color:#eee}
+  input[type=number]{width:80px}
+  input[type=text]{width:150px;direction:ltr}
+  button{cursor:pointer}
+  button:hover{background:#323946}
+  button.primary{background:#2d6cdf;border-color:#2d6cdf}
+  #frameBox{background:#000;border-radius:10px;overflow:hidden;width:400px;max-width:100%}
+  iframe{display:block;width:400px;max-width:100%;height:720px;border:0}
+  #log{height:300px;overflow:auto;background:#0c0e11;border-radius:8px;padding:8px;font:12px/1.5 Consolas,monospace;direction:ltr;text-align:left;white-space:pre-wrap}
+  .ok{color:#6fdc8c}.warn{color:#ffc857}.err{color:#ff6b6b}.msg{color:#8ec5ff}
+  #status{font:13px Consolas,monospace;direction:ltr;text-align:left;color:#9fd}
+  #shotBox img{max-width:100%;border:1px solid #3a414d;border-radius:6px;margin-top:6px}
+  .hint{font-size:12px;color:#9aa}
+</style>
+</head>
+<body>
+<h1>Songbook – בדיקת embed של אינסטגרם</h1>
+<div class="sub">הדף הזה מטמיע רילס דרך <code>/reel/CODE/embed</code> ומדבר עם התוסף ב-postMessage. כל מה שקורה נרשם בלוג.</div>
+
+<div class="wrap">
+  <div class="col">
+    <div class="card">
+      <div class="row">
+        <label>קוד רילס:</label>
+        <input type="text" id="code" value="DUyMx4agGWZ">
+        <select id="variant">
+          <option value="embed">/embed</option>
+          <option value="embed/captioned">/embed/captioned</option>
+        </select>
+        <button class="primary" id="load">טען</button>
+      </div>
+      <div class="hint">ברירת מחדל: Me Gustas Tú (יש בו טאב על המסך). אחרי "טען", לחץ פעם אחת על הרילס אם הוא לא מתחיל לבד.</div>
+    </div>
+
+    <div id="frameBox"><iframe id="ig" allow="autoplay; fullscreen; encrypted-media" allowfullscreen></iframe></div>
+  </div>
+
+  <div class="col">
+    <div class="card">
+      <b>שליטה בתוסף</b>
+      <div class="row">
+        <button id="ping">ping</button>
+        <button id="ctx">context (song=test-song)</button>
+      </div>
+      <div class="row">
+        <label>קפוץ לשנייה</label>
+        <input type="number" id="t" value="5" step="0.1" min="0">
+        <label><input type="checkbox" id="pause" checked> עצור</label>
+        <button class="primary" id="seek">seek</button>
+      </div>
+      <div class="row">
+        <button data-speed="0.5">0.5x</button>
+        <button data-speed="0.75">0.75x</button>
+        <button data-speed="1">1x</button>
+        <button id="play">play</button>
+        <button id="pauseBtn">pause</button>
+      </div>
+      <div class="row">
+        <button id="capture">📷 capture (לחיצה שלי)</button>
+      </div>
+      <div id="status">status: —</div>
+    </div>
+
+    <div class="card">
+      <b>פריים שהגיע ל-postMessage</b>
+      <div id="shotBox" class="hint">עדיין לא הגיע פריים.</div>
+    </div>
+
+    <div class="card">
+      <div class="row"><b>לוג</b>
+        <button id="copy">העתק דו"ח</button>
+        <button id="clear">נקה</button>
+      </div>
+      <div id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const frame = $('ig');
+const logEl = $('log');
+const entries = [];
+let gotReady = false, loadedAt = 0;
+
+function log(cls, text, extra){
+  const ts = ((performance.now()-loadedAt)/1000).toFixed(1).padStart(5,' ');
+  const line = `[${ts}s] ${text}`;
+  entries.push({t:+ts, text, extra});
+  const d = document.createElement('div');
+  d.className = cls; d.textContent = line;
+  logEl.appendChild(d); logEl.scrollTop = logEl.scrollHeight;
+}
+
+function send(msg){
+  frame.contentWindow.postMessage(msg, '*');
+  log('msg', '→ ' + JSON.stringify(msg));
+}
+
+function load(){
+  const code = $('code').value.trim();
+  if(!code) return;
+  gotReady = false; loadedAt = performance.now();
+  logEl.textContent = ''; entries.length = 0;
+  log('ok', `טוען https://www.instagram.com/reel/${code}/${$('variant').value}  (דף האב: ${location.origin})`);
+  frame.src = `https://www.instagram.com/reel/${code}/${$('variant').value}`;
+  setTimeout(()=>{ if(!gotReady) log('warn','8 שניות בלי songbook-ready מה-iframe: התוסף לא רץ בתוך ה-embed (או שה-embed לא מכיל video). בדוק שהתוסף מופעל ושרענת את הדף.'); }, 8000);
+  setTimeout(()=>{ if(!gotReady) log('warn','20 שניות בלי songbook-ready.'); }, 20000);
+}
+
+window.addEventListener('message', ev => {
+  const d = ev.data;
+  if(!d || typeof d !== 'object' || typeof d.type !== 'string' || !d.type.startsWith('songbook-')) return;
+  if(d.type === 'songbook-ready'){ gotReady = true; log('ok', '← songbook-ready  (origin ' + ev.origin + ')'); return; }
+  if(d.type === 'songbook-status'){
+    $('status').textContent = `status: ready=${d.ready} t=${d.t} / ${d.duration}  paused=${d.paused}  rate=${d.rate}  fps=${d.fps}`;
+    if(!gotReady && d.ready){ gotReady = true; }
+    return;
+  }
+  // כל הודעה אחרת: נציג מפתחות, ואם יש תמונה נציג אותה
+  const keys = Object.keys(d).map(k => {
+    const v = d[k];
+    let desc = typeof v;
+    if(typeof v === 'string') desc = v.startsWith('data:image') ? `dataURL(${(v.length/1024).toFixed(0)}KB)` : JSON.stringify(v).slice(0,60);
+    else if(v instanceof Blob) desc = `Blob(${(v.size/1024).toFixed(0)}KB ${v.type})`;
+    else if(v instanceof ArrayBuffer) desc = `ArrayBuffer(${(v.byteLength/1024).toFixed(0)}KB)`;
+    else if(typeof v === 'number' || typeof v === 'boolean') desc = String(v);
+    return `${k}=${desc}`;
+  }).join('  ');
+  log(d.type === 'songbook-captured' ? 'ok' : 'msg', `← ${d.type}  ${keys}`);
+  if(d.type === 'songbook-captured') showShot(d);
+});
+
+function showShot(d){
+  let url = null, how = '';
+  for(const k of Object.keys(d)){
+    const v = d[k];
+    if(typeof v === 'string' && v.startsWith('data:image')){ url = v; how = k + ' (dataURL)'; }
+    else if(v instanceof Blob && v.type.startsWith('image')){ url = URL.createObjectURL(v); how = k + ' (Blob)'; }
+    else if(v instanceof ArrayBuffer){ url = URL.createObjectURL(new Blob([v],{type:'image/png'})); how = k + ' (ArrayBuffer)'; }
+  }
+  const box = $('shotBox');
+  if(!url){
+    box.innerHTML = '<span class="warn">songbook-captured הגיע בלי תמונה (רק מטא-דאטה). כנראה שהתוסף עדיין שומר רק לקובץ. צריך להוסיף לו שליחת הפריים לדף האב.</span>';
+    return;
+  }
+  box.innerHTML = `<div class="ok">הגיעה תמונה דרך ${how}</div><img id="shotImg" src="${url}">`;
+  const img = $('shotImg');
+  img.onload = () => {
+    // בדיקת "פריים שחור": דגימה של הפיקסלים
+    const c = document.createElement('canvas'); c.width = 64; c.height = 64;
+    const x = c.getContext('2d'); x.drawImage(img,0,0,64,64);
+    const px = x.getImageData(0,0,64,64).data; let sum = 0;
+    for(let i=0;i<px.length;i+=4) sum += (px[i]+px[i+1]+px[i+2])/3;
+    const avg = sum/(64*64);
+    log(avg < 8 ? 'err' : 'ok', `פריים ${img.naturalWidth}x${img.naturalHeight}, בהירות ממוצעת ${avg.toFixed(1)} ` + (avg < 8 ? '(נראה שחור!)' : '(לא שחור)'));
+  };
+}
+
+$('load').onclick = load;
+$('ping').onclick = () => send({type:'songbook-ping'});
+$('ctx').onclick = () => send({type:'songbook-context', song:'test-song'});
+$('seek').onclick = () => send({type:'songbook-seek', t:parseFloat($('t').value), pause:$('pause').checked});
+$('play').onclick = () => send({type:'songbook-play'});
+$('pauseBtn').onclick = () => send({type:'songbook-pause'});
+$('capture').onclick = () => send({type:'songbook-capture'});
+document.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => send({type:'songbook-speed', rate:parseFloat(b.dataset.speed)}));
+$('clear').onclick = () => { logEl.textContent=''; entries.length=0; };
+$('copy').onclick = async () => {
+  const report = `origin: ${location.origin}\nua: ${navigator.userAgent}\ngotReady: ${gotReady}\n` + entries.map(e=>`[${e.t}s] ${e.text}`).join('\n');
+  try{ await navigator.clipboard.writeText(report); log('ok','הדו"ח הועתק ללוח'); }
+  catch(e){ log('err','לא הצלחתי להעתיק: '+e.message); }
+};
+// ping מחזורי כדי לראות סטטוס חי
+setInterval(()=>{ if(frame.contentWindow && frame.src) frame.contentWindow.postMessage({type:'songbook-ping'},'*'); }, 1000);
+loadedAt = performance.now();
+log('', 'לחץ "טען" כדי להתחיל. דף האב: ' + location.origin);
+</script>
+</body>
+</html>
