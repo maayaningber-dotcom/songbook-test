@@ -253,6 +253,7 @@ button.mark:hover{background:var(--accent-soft)}
     <a href="#library" data-nav="library">Songs</a>
     <a href="#chords" data-nav="chords">Chords</a>
     <a href="#pending" data-nav="pending">To approve<span class="badge" id="pendBadge" hidden>0</span></a>
+    <a href="#" id="importBtn" title="Import marks and song suggestions from a JSON file">Import marks</a>
     <a href="#" id="migrateBtn" title="One-time: move screenshots to their video versions">Move shots</a>
     <a href="#" id="exportBtn" title="Download a JSON backup of all data">Export data</a>
   </nav>
@@ -1198,6 +1199,56 @@ function openMigrateDialog(){
   };
 }
 document.getElementById("migrateBtn").onclick=e=>{ e.preventDefault(); openMigrateDialog(); };
+
+// ================= Import marks (JSON from the video pass) =================
+// {"format":"songbook-import-v1","reels":[{"code":"DAbc12","marks":[{"t":12,"kind":"part","label":"Verse"}],"identify":{"title":"","artist":"","note":""}}]}
+// marks go to every video version with that reel code (never deleting, skipping t±1s + same kind); "identify" fills the guess of a pending reel, which you still approve in To approve.
+function normCode(c){ c=String(c||"").trim(); const p=igPath(c); if(p) return ["ig:"+p.code]; const y=/^https?:/.test(c)?ytId(c):null; if(y) return ["yt:"+y]; if(/^(ig|yt):/.test(c)) return [c]; return c?["ig:"+c,"yt:"+c]:[]; }
+function planImport(data){
+  const errs=[], items=[];
+  if(!data || data.format!=="songbook-import-v1" || !Array.isArray(data.reels)) return {errs:["This file isn't a Songbook import (format songbook-import-v1 expected)."], items};
+  for(const r of data.reels){
+    const codes=normCode(r.code||r.url); if(!codes.length){ errs.push("A reel without a code was skipped."); continue; }
+    const marks=(Array.isArray(r.marks)?r.marks:[]).map(m=>({t:Math.round((+m.t)*10)/10, kind:MARK_KIND[m.kind]?m.kind:"part", label:String(m.label||"").slice(0,80)})).filter(m=>isFinite(m.t)&&m.t>=0);
+    const targets=[];
+    for(const s of S.songs.values()) for(const x of (s.sources||[])) if(codes.includes(codeOf(x))) targets.push({song:s, src:x,
+      add:marks.filter(m=>!(x.marks||[]).some(o=>o.kind===m.kind && Math.abs(o.t-m.t)<=1)).filter((m,i,a)=>a.findIndex(z=>z.kind===m.kind&&Math.abs(z.t-m.t)<=1)===i)});
+    const pend=S.pending.find(p=>p.type==="identify" && p.sourceUrl && codes.includes(codeOf({kind:srcKind(p.sourceUrl), url:p.sourceUrl})));
+    const idf=r.identify && (r.identify.title||r.identify.artist||r.identify.note) ? {title:String(r.identify.title||"").slice(0,120), artist:String(r.identify.artist||"").slice(0,120), note:String(r.identify.note||"").slice(0,400)} : null;
+    if(!targets.length && !(pend&&idf)){ errs.push("Reel "+(r.code||r.url)+": not found in any song"+(idf?" or pending item":"")+"."); continue; }
+    items.push({code:String(r.code||r.url), targets, pend:(pend&&idf)?pend:null, idf, nMarks:marks.length});
+  }
+  return {errs, items};
+}
+function openImportDialog(){
+  openDlg("Import marks", `<p class="help">Choose the JSON file from the video pass (or paste it). You'll see exactly what will be added before anything is written. Nothing is ever deleted.</p>
+    <input type="file" id="impFile" accept=".json,application/json"><textarea id="impTxt" rows="4" style="width:100%;margin-top:8px" placeholder="…or paste the JSON here"></textarea>
+    <div class="row" style="margin-top:8px"><button class="btn small" id="impPrev">Preview</button></div><div id="impOut"></div>`);
+  $("#impFile").onchange=async e=>{ const f=e.target.files[0]; if(f){ $("#impTxt").value=await f.text(); $("#impPrev").click(); } };
+  $("#impPrev").onclick=()=>{
+    let data; try{ data=JSON.parse($("#impTxt").value); }catch(err){ $("#impOut").innerHTML=`<p style="color:#c0392b">Not valid JSON: ${esc(err.message)}</p>`; return; }
+    const plan=planImport(data); let nAdd=0, nProp=0;
+    const rows=plan.items.map(it=>{
+      const parts=it.targets.map(t=>{ nAdd+=t.add.length; return `<div dir="auto"><b>${esc(t.song.title)}</b> · reel ${esc(it.code)}: ${t.add.length?t.add.map(m=>`${fmtT(m.t)} ${esc(m.label||MARK_KIND[m.kind])}`).join(", "):"<span class='muted'>nothing new</span>"}${it.nMarks-t.add.length>0&&t.add.length<it.nMarks?` <span class="muted">(${it.nMarks-t.add.length} already there)</span>`:""}</div>`; });
+      if(it.pend){ nProp++; parts.push(`<div dir="auto">Pending reel ${esc(it.code)}: suggest <b>${esc(it.idf.title)}</b> — ${esc(it.idf.artist)}${it.idf.note?` <span class="muted">(${esc(it.idf.note)})</span>`:""}</div>`); }
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--line,#ddd)">${parts.join("")}</div>`;
+    }).join("");
+    $("#impOut").innerHTML=`${plan.errs.length?`<div class="note" style="margin:10px 0">${plan.errs.map(esc).join("<br>")}</div>`:""}
+      <div style="max-height:40vh;overflow:auto;margin-top:10px">${rows||"<p class='muted'>Nothing to import.</p>"}</div>
+      ${nAdd||nProp?`<div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn primary" id="impGo">Add ${nAdd} mark${nAdd===1?"":"s"}${nProp?` and ${nProp} suggestion${nProp===1?"":"s"}`:""}</button></div>`:""}`;
+    const go=$("#impGo"); if(go) go.onclick=async()=>{
+      go.disabled=true; go.textContent="Writing…";
+      try{
+        for(const it of plan.items){
+          for(const t of it.targets){ if(!t.add.length) continue; t.src.marks=(t.src.marks||[]).concat(t.add); await saveSong(t.song); }
+          if(it.pend && S.db){ const {id, ...rest}=it.pend; const up=Object.assign({}, rest, {guessTitle:it.idf.title||rest.guessTitle||"", guessArtist:it.idf.artist||rest.guessArtist||"", message:it.idf.note||rest.message||""}); Object.assign(it.pend, up); await S.db.doc("pending/"+id).set(JSON.parse(JSON.stringify(up))); }
+        }
+        closeDlg(); toast("Imported: "+nAdd+" marks, "+nProp+" suggestions"); route();
+      }catch(err){ toast("Import stopped: "+(err.message||err)); }
+    };
+  };
+}
+document.getElementById("importBtn").onclick=e=>{ e.preventDefault(); openImportDialog(); };
 async function removeShot(song, key, assetId){
   for(const {song:s, h} of holdersFor(song,key)){ h.shots=(h.shots||[]).filter(a=>a.assetId!==assetId); await saveSong(s); }
   try{ await S.assets.delete(assetId); }catch(e){}
