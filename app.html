@@ -275,7 +275,37 @@ textarea.sheetedit{min-height:300px;font-family:var(--font-mono);font-size:14px;
 button.mark{background:transparent;cursor:pointer;font:inherit;font-size:12px}
 button.mark:hover{background:var(--accent-soft)}
 .shot img{width:100%;display:block}
-@media (max-width:700px){ #dock iframe{height:420px} }
+/* the player never covers the page: a side column on wide screens, a small corner card in between, a bottom strip on phones */
+@media (min-width:1180px){
+  #dock{top:57px;right:0;bottom:0;width:380px;max-height:none;border-radius:0;border-width:0 0 0 1px;box-shadow:none}
+  #dock iframe{height:calc(100vh - 200px);min-height:420px;max-height:760px}
+  body.dock-on:not(.dock-min) main{padding-right:380px}
+  #dock.min{top:auto;bottom:14px;right:14px;width:300px;border-width:1px;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.28)}
+}
+@media (max-width:1179px){ #dock{width:min(330px,calc(100vw - 28px))} #dock iframe{height:400px} }
+@media (max-width:700px){
+  #dock{left:0;right:0;bottom:0;width:auto;border-radius:12px 12px 0 0;max-height:52vh}
+  #dock iframe{height:calc(52vh - 120px);min-height:220px}
+  body.dock-on:not(.dock-min) main{padding-bottom:52vh}
+}
+/* versions row: one Instagram tab with a version picker */
+.sheettabs .st.vtab{flex-direction:row;align-items:center;gap:6px;padding:6px 10px}
+.vtab .vlab{display:flex;flex-direction:column;line-height:1.2}
+.vtab select{font:inherit;font-size:12px;font-weight:500;max-width:190px;border:1px solid var(--line);border-radius:6px;padding:2px 4px;background:var(--surface);color:var(--ink);cursor:pointer}
+/* audio | screenshots switch inside a video version */
+.vswitch{display:inline-flex;position:relative;background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:3px;margin:4px 0 12px;user-select:none}
+.vswitch button{position:relative;z-index:1;border:0;background:transparent;padding:6px 16px;border-radius:999px;cursor:pointer;font:inherit;font-weight:600;color:var(--muted);transition:color .2s}
+.vswitch button[aria-checked="true"]{color:var(--accent-ink)}
+.vswitch .knob{position:absolute;top:3px;bottom:3px;left:3px;width:calc(50% - 3px);border-radius:999px;background:var(--accent);transition:transform .25s ease}
+.vswitch.right .knob{transform:translateX(100%)}
+/* chords heard in the audio, in rows of four, the one playing now lit */
+.heard{font-family:var(--font-mono);display:flex;flex-direction:column;gap:6px;margin:6px 0 4px}
+.heard .hrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.heard .ht{font-size:11px;color:var(--muted);width:38px;text-decoration:none;flex:none}
+.heard .ht:hover{color:var(--accent)}
+.heard .hc{min-width:64px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-weight:700;color:var(--accent);cursor:pointer;text-align:center;background:var(--surface);transition:background .15s,color .15s}
+.heard .hc.now{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.anst{font-size:13px;color:var(--muted);margin:6px 0}
 </style>
 </head>
 <body>
@@ -895,7 +925,14 @@ function renderSong(v, id){
   const capoNow = S.viewCapo===null ? (+song.capo||0) : S.viewCapo;
   const n = shift(song), flats = useFlats(song);
   const _sheets = getSheets(song); const _cur = _sheets.find(x=>x.id===S.sheetId) || _sheets[0];
-  const chords = (_cur && chordsOfText(_cur.text).length) ? chordsOfText(_cur.text) : chordsOfSong(song);
+  // the chord strip follows what is shown: the video version (audio or screenshots side) or the open text version
+  const _selV = selVideo(song); let chords=[], chOff=0, chFrom="";
+  if(_selV){
+    const mine=_sheets.filter(x=>x.sourceId===_selV.id);
+    if(vview(_selV)==="audio"){ const hs=mine.find(x=>x.heard); if(hs){ heardItems(hs).flat.forEach(f=>{ if(!chords.includes(f.c)) chords.push(f.c); }); chOff=(+hs.capo||0)-(+song.capo||0); chFrom="from the audio"; } }
+    else { const sh=mine.filter(x=>!x.heard && x.kind!=="tab")[0]||mine.filter(x=>!x.heard)[0]; if(sh){ chords=chordsOfText(sh.text); chOff=(+sh.capo||0)-(+song.capo||0); chFrom="from the screenshots"; } }
+  } else if(_cur){ chords=chordsOfText(_cur.text); chOff=(+_cur.capo||0)-(+song.capo||0); }
+  if(!_selV && !chords.length) chords=chordsOfSong(song);
   const heb = song.lang==="he" || hasHeb(song.title);
   const keyNow = song.key ? tChord(song.key, S.transpose, flats) : "";
   const vids = (song.sources||[]).filter(s=>s.kind==="instagram"||s.kind==="youtube");
@@ -937,8 +974,8 @@ function renderSong(v, id){
   <div class="layout">
     <div>
       <section class="panel">
-        <h2>Chords in this song <span class="muted" style="font-size:13px;font-family:var(--font-body);font-weight:400">tap for every way to play it</span></h2>
-        ${chords.length ? `<div class="strip">${chords.map(c=>{ const tc=tChord(c,n+(_cur&&chordsOfText(_cur.text).length?((+_cur.capo||0)-(+song.capo||0)):0),flats); const vv=pickedVoicing(tc, song); return `<button class="mini" data-chord="${esc(tc)}">${vv?diagram(vv,{w:70,gy:12,fingers:false}):""}<b>${esc(tc)}</b></button>`; }).join("")}</div>` : `<p class="empty-sheet">No chords yet.</p>`}
+        <h2>Chords in this ${_selV?"version":"song"} <span class="muted" style="font-size:13px;font-family:var(--font-body);font-weight:400">${chFrom?esc(chFrom)+" · ":""}tap for every way to play it</span></h2>
+        ${chords.length ? `<div class="strip">${chords.map(c=>{ const tc=tChord(c,n+chOff,flats); const vv=pickedVoicing(tc, song); return `<button class="mini" data-chord="${esc(tc)}">${vv?diagram(vv,{w:70,gy:12,fingers:false}):""}<b>${esc(tc)}</b></button>`; }).join("")}</div>` : `<p class="empty-sheet">${_selV?"No chords for this version yet.":"No chords yet."}</p>`}
       </section>
       ${(song.shots||[]).length?`<section class="panel">
         <h2>Screenshots not in a version yet</h2>
@@ -996,6 +1033,9 @@ function renderSong(v, id){
     el.addEventListener("input", ()=>{ st.textContent="Editing…"; clearTimeout(t); t=setTimeout(async()=>{ apply(el.value); await saveSong(song); st.textContent=S.db?"Saved":"Not saved: storage isn't available in this view"; }, 900); });
   }
   v.querySelectorAll("[data-srcver]").forEach(b=>b.onclick=()=>{ S.srcVer=b.dataset.srcver; S.sheetId=null; if(DK.songId!==song.id||DK.srcId!==S.srcVer) dockOpen(song, S.srcVer); route(); });
+  v.querySelectorAll("[data-versel]").forEach(sel=>sel.onchange=()=>{ S.srcVer=sel.value; S.sheetId=null; if(DK.songId!==song.id||DK.srcId!==S.srcVer) dockOpen(song, S.srcVer); route(); });
+  v.querySelectorAll("[data-vview]").forEach(b=>b.onclick=()=>{ S.vview=b.dataset.vview; route(); });
+  v.querySelectorAll("[data-analyze]").forEach(b=>b.onclick=()=>analyzeVersion(song, b.dataset.analyze, true));
   const addShotsV=$("#addShotsVer"); if(addShotsV) addShotsV.onclick=async()=>{ migrate(song); const sh={id:uid(), kind:"tab", label:"Screenshots", text:"", capo:+song.capo||0, shots:[]}; song.sheets=song.sheets.concat([sh]); S.sheetId=sh.id; await saveSong(song); route(); };
   v.querySelectorAll("[data-editsheet]").forEach(b=>b.onclick=()=>openSheetDialog(song, getSheets(song).find(x=>x.id===b.dataset.editsheet)));
   v.querySelectorAll("[data-convert]").forEach(b=>b.onclick=()=>openConvertDialog(song, b.dataset.convert));
@@ -1019,7 +1059,11 @@ function sheetTabsHTML(song, n, flats, heb){
   // order: chords first, then tabs
   const texts = sheets.filter(x=>!owned.has(x.sourceId));
   const ordered = texts.filter(x=>x.kind!=="tab").concat(texts.filter(x=>x.kind==="tab"));
-  const vtabs = vs.map((x,i)=>`<button class="st" role="tab" data-srcver="${esc(x.id)}" aria-selected="${x===selV}">▶ ${esc(verLabel(x,i))}${(x.shots||[]).length?`<small>${x.shots.length} 📷</small>`:""}</button>`).join("");
+  // all video versions live in ONE tab; its dropdown picks the version
+  const curV = selV || vs.find(x=>x.id===S.srcVer) || vs[0];
+  const allIg = vs.every(x=>x.kind==="instagram");
+  const vtabs = vs.length ? `<div class="st vtab" role="tab" aria-selected="${!!selV}"><button class="btn small ghost" style="padding:2px 4px;font-weight:600" data-srcver="${esc(curV.id)}"><span class="vlab">▶ ${allIg?"Instagram":"Videos"}<small>${vs.length} version${vs.length>1?"s":""}</small></span></button>
+      <select data-versel aria-label="Choose the video version">${vs.map((x,i)=>`<option value="${esc(x.id)}" ${x===curV?"selected":""}>${i+1}. ${esc(verLabel(x,i))}${x.kind==="youtube"?" (YouTube)":""}${(x.shots||[]).length?` · ${x.shots.length} 📷`:""}</option>`).join("")}</select></div>` : "";
   const addBtns = `<button class="btn small add" id="addSheet2">+ Add version</button><button class="btn small add" id="addShotsVer" title="A version made only of screenshots, with no video">+ Screenshots</button>`;
   if(selV) return `<div class="sheettabs" role="tablist" aria-label="Versions">${vtabs}${ordered.map(sh=>`<button class="st" role="tab" data-sheet="${esc(sh.id)}" aria-selected="false">${sheetName(sheets, sh)}${sh.label?`<small dir="auto">${esc(sh.label)}</small>`:""}</button>`).join("")}${addBtns}</div>${videoPanelHTML(song, selV, n, flats)}`;
   if(!ordered.length) return `<div class="sheettabs" role="tablist" aria-label="Versions">${vtabs}${addBtns}</div>`;
@@ -1045,12 +1089,113 @@ function videoPanelHTML(song, src, n, flats){
   return `<section class="panel sheetpanel" role="tabpanel">
     <div class="sheetbar"><span class="muted" style="font-size:12px" dir="auto">${esc(info)}${shared?" · shared with another song":""} · <a href="${esc(src.url)}" target="_blank" rel="noopener">original</a></span>
       <span class="row" style="gap:6px"><button class="btn small" data-play="${esc(src.id)}">▶ Play</button><button class="btn small ghost" data-editsrc="${esc(src.id)}">Edit video</button></span></div>
+    ${canHear(src)?`<div class="vswitch ${vview(src)==="shots"?"right":""}" role="radiogroup" aria-label="What to show for this version"><span class="knob"></span><button role="radio" aria-checked="${vview(src)==="audio"}" data-vview="audio">🎧 From the audio</button><button role="radio" aria-checked="${vview(src)==="shots"}" data-vview="shots">📷 From screenshots</button></div>`:""}
+    ${vview(src)==="audio" ? heardPanelHTML(song, src, n, flats) : `
     <h3 class="vh">Screenshots ${uploadBtn(key)}</h3>
     ${shotsHTML(src.shots, key)}
-    ${mine.map(sh=>`<h3 class="vh">${sheetName(sheets, sh)}${sh.auto?` <span class="badge" style="position:static">draft</span>`:""} <button class="btn small ghost" data-editsheet="${esc(sh.id)}">Edit</button></h3>${fullSheetHTML(sh.text, song.lang==="he"&&sh.kind!=="tab", n+((+sh.capo||0)-(+song.capo||0)), flats, sh.kind)}`).join("")}
-    ${convertBtnHTML(src.shots, key)}
-    ${listenBtnHTML(src)}
+    ${mine.filter(x=>!x.heard).map(sh=>`<h3 class="vh">${sheetName(sheets, sh)}${sh.auto?` <span class="badge" style="position:static">draft</span>`:""} <button class="btn small ghost" data-editsheet="${esc(sh.id)}">Edit</button></h3>${fullSheetHTML(sh.text, song.lang==="he"&&sh.kind!=="tab", n+((+sh.capo||0)-(+song.capo||0)), flats, sh.kind)}`).join("")}
+    ${convertBtnHTML(src.shots, key)}`}
   </section>`;
+}
+// ================= chords from the audio, read once in the background (extension 1.4.0) =================
+const canHear = src => src && src.kind==="instagram" && !!igPath(src.url);
+const vview = src => canHear(src) && S.vview!=="shots" ? "audio" : "shots";
+const heardSheet = (song, srcId) => getSheets(song).find(x=>x.heard && x.sourceId===srcId);
+// AN: background analysis state per version {state:"wait"|"play"|"load"|"read"|"done"|"err", pct, msg}
+const AN = {by:{}, want:null, noExtT:null};
+function anMsg(srcId){
+  const a=AN.by[srcId]; if(!a) return "";
+  return a.state==="wait" ? "Connecting to the extension…"
+    : a.state==="play" ? "Press ▶ in the video once; the chords are read right after."
+    : a.state==="load" ? "Loading the sound…"
+    : a.state==="read" ? `Reading the chords… ${a.pct||0}%`
+    : a.state==="err" ? esc(a.msg||"Couldn't read the sound.") : "";
+}
+// rows of four chords; each chord keeps its time so the one playing can be lit
+function heardItems(sh){
+  const lines=String(sh.text||"").split("\n").map(l=>/^\s*\[(\d+):(\d{2})\]\s*(.*)$/.exec(l)).filter(Boolean)
+    .map(m=>({t:(+m[1])*60+(+m[2]), chords:m[3].trim().split(/\s+/).filter(Boolean)}));
+  const flat=[]; lines.forEach((ln,i)=>{ const next=i+1<lines.length?lines[i+1].t:ln.t+ln.chords.length*2;
+    ln.chords.forEach((c,k)=>flat.push({c, t:ln.t+(next-ln.t)*k/Math.max(1,ln.chords.length), row:i})); });
+  const segs=sh.segs||[];
+  if(segs.length===flat.length && segs.every((s,i)=>s.c===flat[i].c)) flat.forEach((f,i)=>f.t=segs[i].t);
+  return {rows:lines.length, flat};
+}
+function heardPanelHTML(song, src, n, flats){
+  const sh=heardSheet(song, src.id), msg=anMsg(src.id), busy=AN.by[src.id] && !["done","err"].includes(AN.by[src.id].state);
+  let body="";
+  if(sh){
+    const {rows, flat}=heardItems(sh), nn=n+((+sh.capo||0)-(+song.capo||0));
+    body=`<div class="heard" id="heardBox" data-src="${esc(src.id)}">${Array.from({length:rows},(_,r)=>{ const it=flat.filter(f=>f.row===r); return `<div class="hrow"><a class="ht" href="#" data-seek="${it[0]?it[0].t:0}" data-src="${esc(src.id)}" title="Play from here">${fmtT(it[0]?it[0].t:0)}</a>${it.map(f=>{ const tc=tChord(f.c,nn,flats); return `<span class="hc" data-chord="${esc(tc)}" data-t="${f.t}" tabindex="0">${esc(tc)}</span>`; }).join("")}</div>`; }).join("")}</div>`;
+  } else if(!busy && !msg) body=`<p class="empty-sheet">No chords from the audio yet.</p>`;
+  return `${body}
+    ${msg?`<div class="anst" id="anSt">${msg}</div>`:`<div class="anst" id="anSt" hidden></div>`}
+    <div class="row" style="gap:8px;margin-top:8px">
+      <button class="btn small ${sh?"":"primary"}" data-analyze="${esc(src.id)}" ${busy?"disabled":""}>${sh?"↻ Listen again":"🎧 Load chords from audio"}</button>
+      ${sh?`<button class="btn small ghost" data-editsheet="${esc(sh.id)}">✏️ Fix chords</button>`:""}
+      <span class="muted" style="font-size:12px">${sh?"Guessed from the sound on this computer; the lit chord follows the video.":"Read from the video's sound on this computer, in the background. Only chord names are kept."}</span>
+    </div>`;
+}
+function anUpdate(srcId){ // refresh the status line without a full re-render
+  const el=document.getElementById("anSt"); if(!el) return;
+  const box=el.closest(".sheetpanel"); if(!box || !box.querySelector(`[data-analyze="${CSS.escape(srcId)}"]`)) return;
+  const m=anMsg(srcId); el.hidden=!m; el.innerHTML=m;
+  const b=box.querySelector(`[data-analyze="${CSS.escape(srcId)}"]`); if(b) b.disabled=!!(AN.by[srcId] && !["done","err"].includes(AN.by[srcId].state));
+}
+// start reading a version's sound (the dock must hold that reel; the extension does the work)
+function analyzeVersion(song, srcId, manual){
+  const src=(song.sources||[]).find(x=>x.id===srcId); if(!canHear(src)) return;
+  if(DK.songId!==song.id || DK.srcId!==srcId){  // open that reel first; the request goes out when the extension answers
+    S.srcVer=srcId; S.sheetId=null; dockOpen(song, srcId); AN.by[srcId]={state:"wait"}; AN.want=srcId; route(); return;
+  }
+  AN.by[srcId]={state:"wait"}; AN.want=srcId; anUpdate(srcId);
+  if(DK.ready) anSend();
+}
+function anSend(){
+  if(!AN.want || DK.srcId!==AN.want) return;
+  dockSend({type:"songbook-analyze"});
+  const id=AN.want; clearTimeout(AN.noExtT);
+  AN.noExtT=setTimeout(()=>{ const a=AN.by[id]; if(a && a.state==="wait"){ AN.by[id]={state:"err", msg:"No answer: load extension 1.4.0 in chrome://extensions, then reload this page."}; anUpdate(id); } },6000);
+}
+// automatic: a reel version without chords from the audio gets them the first time it's opened
+function anAuto(){
+  const song=S.songs.get(DK.songId); if(!song || DK.kind!=="instagram") return;
+  if(AN.want===DK.srcId){ anSend(); return; }
+  const src=(song.sources||[]).find(x=>x.id===DK.srcId);
+  if(canHear(src) && !heardSheet(song, src.id) && !AN.by[src.id]){ AN.by[src.id]={state:"wait"}; AN.want=src.id; anUpdate(src.id); anSend(); }
+}
+async function anMessage(d){
+  const id=DK.srcId, song=S.songs.get(DK.songId); if(!id || !song) return;
+  if(d.type==="songbook-analyzing"){
+    clearTimeout(AN.noExtT);
+    AN.by[id] = d.stage==="needPlay" ? {state:"play"} : d.stage==="loading" ? {state:"load"} : {state:"read", pct:d.pct||0};
+    anUpdate(id); return;
+  }
+  if(d.type==="songbook-analyze-failed"){ clearTimeout(AN.noExtT); AN.by[id]={state:"err", msg:"Couldn't read the sound: "+(d.error||"unknown")}; AN.want=null; anUpdate(id); return; }
+  // songbook-chords with analyzed:true -> save as this version's "From audio" chords, no dialog
+  AN.want=null;
+  const segs=(d.segments||[]), {text, n, list}=heardText(segs);
+  if(!n){ AN.by[id]={state:"err", msg:"No chords heard in this video (maybe there's no strumming)."}; anUpdate(id); return; }
+  try{
+    migrate(song);
+    const old=song.sheets.find(x=>x.heard && x.sourceId===id);
+    const sh=Object.assign(old||{id:uid()}, {kind:"chords", label:"From audio", text, segs:list.map(x=>({t:+x.t0.toFixed(2), c:x.chord})), capo:0, auto:true, heard:true, sourceId:id, heardAt:new Date().toISOString(), heardLen:d.duration||null});
+    if(!old) song.sheets=song.sheets.concat([sh]);
+    await saveSong(song);
+    AN.by[id]={state:"done"}; route(); toast(`Chords from the audio: ${n} changes`);
+  }catch(e){ AN.by[id]={state:"err", msg:"Couldn't save: "+(e.message||e)}; anUpdate(id); }
+}
+// light the chord playing now (called with the video time several times a second)
+let _hlLast=null;
+function heardHighlight(t){
+  const box=document.getElementById("heardBox"); if(!box || box.dataset.src!==DK.srcId) return;
+  const cs=[...box.querySelectorAll(".hc")]; let cur=null;
+  for(const c of cs){ if(+c.dataset.t<=t+0.15) cur=c; else break; }
+  if(cur===_hlLast) return;
+  if(_hlLast) _hlLast.classList.remove("now");
+  _hlLast=cur; if(!cur) return;
+  cur.classList.add("now");
+  if(DK.paused===false){ const r=cur.getBoundingClientRect(); if(r.top<70 || r.bottom>innerHeight-40) cur.scrollIntoView({block:"center", behavior:"smooth"}); }
 }
 // ================= chords from audio (extension 1.3.0, listen.js) =================
 // LS: the one listening session (only the dock's Instagram video can be listened to)
@@ -1098,7 +1243,7 @@ function heardText(segs){
   const s=segs.filter(x=>x && x.chord && x.t1-x.t0>=0.6).sort((a,b)=>a.t0-b.t0), out=[];
   const merged=[]; for(const x of s){ const p=merged[merged.length-1]; if(p && p.chord===x.chord && x.t0-p.t1<1) p.t1=Math.max(p.t1,x.t1); else merged.push(Object.assign({},x)); }
   for(let i=0;i<merged.length;i+=4){ const g=merged.slice(i,i+4); out.push("["+fmtT(g[0].t0)+"] "+g.map(x=>x.chord).join("   ")); }
-  return {text:out.join("\n"), n:merged.length};
+  return {text:out.join("\n"), n:merged.length, list:merged};
 }
 function openHeardDialog(srcId, segs){
   const song=S.songs.get(S.songId); if(!song) return;
@@ -1144,10 +1289,10 @@ async function openConvertDialog(song, key){
   const tabParts=[], chParts=[]; let nNotes=0, nBad=0, nChords=0;
   for(let i=0;i<shots.length;i++){
     if(cancelled||!list.isConnected) return;
-    const sh=shots[i], head=sh.t!=null?"["+fmtT(sh.t)+"]":(shots.length>1?"[Screenshot "+(i+1)+"]":"");
+    const sh=shots[i], head="";  // no video times in the converted text (user's choice); screenshots just follow each other
     st.textContent=`Reading screenshot ${i+1} of ${shots.length}…`;
     const fig=document.createElement("figure"); fig.className="cvshot";
-    fig.innerHTML=`<canvas></canvas><figcaption>${esc(head||"Screenshot")}: <span>reading…</span></figcaption>`;
+    fig.innerHTML=`<canvas></canvas><figcaption>Screenshot ${i+1}: <span>reading…</span></figcaption>`;
     list.appendChild(fig);
     try{
       let url=_assetImg.get(sh.assetId); if(!url){ url=await S.assets.get(sh.assetId); if(url) _assetImg.set(sh.assetId,url); }
@@ -1978,7 +2123,10 @@ function dockEl(){ return document.getElementById("dock"); }
 function dockSend(msg){ const f=document.getElementById("igFrame"); if(f&&f.contentWindow) f.contentWindow.postMessage(msg,"*"); }
 function dockTeardown(){
   if(LS.on){ dockSend({type:"songbook-listen", on:false}); LS.on=false; LS.live=""; LS.msg="Stopped (the video was closed)."; }
-  clearInterval(DK.pingT); clearInterval(DK.loopT); clearTimeout(DK.warnT);
+  clearInterval(DK.pingT); clearInterval(DK.loopT); clearInterval(DK.timeT); clearTimeout(DK.warnT);
+  if(AN.want && AN.by[AN.want] && !["done","err"].includes(AN.by[AN.want].state)) delete AN.by[AN.want];
+  AN.want=null; clearTimeout(AN.noExtT);
+  document.body.classList.remove("dock-on","dock-min");
   if(DK.yt && DK.yt.destroy){ try{ DK.yt.destroy(); }catch(e){} }
   DK.yt=null; DK.ytReady=false; DK.ready=false; DK.songId=null; DK.srcId=null; DK.kind=null; DK.a=DK.b=null; DK.pend=null;
   const d=dockEl(); d.innerHTML=""; d.classList.remove("on");
@@ -2018,8 +2166,9 @@ function dockOpen(song, srcId, pend){
       ${marks.length?`<div class="marks">${marks.map(m=>`<button class="mark ${m.kind==="tab"?"tab":""}" data-seek="${+m.t}" data-src="${esc(src.id)}"><b>${fmtT(m.t)}</b>${esc(m.label||MARK_KIND[m.kind]||"")}</button>`).join("")}</div>`:""}
     </div>`;
   d.classList.add("on");
+  document.body.classList.add("dock-on"); document.body.classList.toggle("dock-min", DK.min);
   const sel=document.getElementById("dkSel"); if(sel) sel.onchange=()=>{ S.srcVer=sel.value; S.sheetId=null; dockOpen(song, sel.value); route(); };
-  document.getElementById("dkMin").onclick=()=>{ DK.min=!DK.min; d.classList.toggle("min",DK.min); document.getElementById("dkMin").textContent=DK.min?"▢":"–"; };
+  document.getElementById("dkMin").onclick=()=>{ DK.min=!DK.min; d.classList.toggle("min",DK.min); document.body.classList.toggle("dock-min", DK.min); document.getElementById("dkMin").textContent=DK.min?"▢":"–"; };
   document.getElementById("dkX").onclick=()=>{ const sid=DK.songId; dockTeardown(); DK.closed[sid]=true; };
   d.querySelectorAll("[data-rate]").forEach(b=>b.onclick=()=>dockRate(+b.dataset.rate));
   document.getElementById("dkPlay").onclick=dockToggle;
@@ -2083,8 +2232,11 @@ window.addEventListener("message", async e=>{
       dockSend({type:"songbook-context", song:DK.songId});
       const st=document.getElementById("dkSt"); if(st) st.textContent="Extension connected";
       if(DK.pend!==null){ dockSend({type:"songbook-seek", t:DK.pend, pause:true}); DK.pend=null; }
+      // follow the video time (lit chord) and read the sound once if this version has no chords yet
+      clearInterval(DK.timeT); DK.timeT=setInterval(()=>dockSend({type:"songbook-ping"}),250);
+      anAuto();
     }
-    if(d.type==="songbook-status"){ DK.paused=d.paused; }
+    if(d.type==="songbook-status"){ DK.paused=d.paused; if(typeof d.t==="number"){ DK.t=d.t; heardHighlight(d.t); } }
   } else if(d.type==="songbook-captured"){
     if(!d.dataUrl){ toast("Frame arrived without an image"); return; }
     const song=S.songs.get(DK.songId); if(!song||!S.assets) return;
@@ -2096,6 +2248,8 @@ window.addEventListener("message", async e=>{
       else { song.shots=song.shots||[]; song.shots.push(Object.assign({srcCode:d.code||""}, entry)); await saveSong(song); toast("Frame saved to “"+song.title+"”"); }
       route();
     }catch(err){ toast("Couldn't save the frame"); }
+  } else if(d.type==="songbook-analyzing" || d.type==="songbook-analyze-failed" || (d.type==="songbook-chords" && d.analyzed)){
+    anMessage(d);
   } else if(d.type==="songbook-listening" || d.type==="songbook-chord-live" || d.type==="songbook-chords"){
     listenMessage(d);
   } else if(d.type==="songbook-capture-failed"){
