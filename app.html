@@ -48,6 +48,25 @@ h1,h2,h3{font-family:var(--font-display);font-stretch:85%;text-wrap:balance;marg
 .datamenu{position:relative;flex:none}
 .datamenu summary{list-style:none;cursor:pointer;padding:7px 12px;border-radius:999px;color:var(--muted);font-weight:500;white-space:nowrap}
 .datamenu summary::-webkit-details-marker{display:none}
+.tunerbtn{flex:none;background:transparent;border:0;cursor:pointer;font:inherit;padding:7px 12px;border-radius:999px;color:var(--muted);font-weight:500;white-space:nowrap}
+.tunerbtn:hover,.datamenu summary:hover{background:var(--accent-soft)}
+@media (max-width:520px){ .tunerbtn{padding:7px 8px} .tunerbtn .tl{display:none} }
+.tn-read{text-align:center;padding:6px 0 10px}
+.tn-note{font-size:44px;font-weight:700;line-height:1.1}
+.tn-note.ok{color:#1a8a3a}
+.tn-sub{color:var(--muted);font-size:13px;min-height:18px}
+.tn-meter{position:relative;height:34px;margin:8px 0 4px;border-radius:8px;background:linear-gradient(90deg,rgba(200,60,40,.18),rgba(26,138,58,.25) 45%,rgba(26,138,58,.25) 55%,rgba(200,60,40,.18))}
+.tn-meter::before{content:"";position:absolute;left:50%;top:0;bottom:0;width:2px;background:var(--ink);opacity:.5}
+.tn-needle{position:absolute;top:3px;bottom:3px;width:6px;margin-left:-3px;border-radius:3px;background:var(--accent);left:50%;transition:left .08s linear}
+.tn-needle.ok{background:#1a8a3a}
+.tn-scale{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
+.tn-rows{display:flex;flex-direction:column;gap:6px;margin:12px 0}
+.tn-row{display:flex;align-items:center;gap:8px;padding:4px 8px;border:1px solid var(--line);border-radius:8px}
+.tn-row.on{border-color:var(--accent);background:var(--accent-soft)}
+.tn-row b{width:62px;font-weight:500;color:var(--muted);font-size:13px}
+.tn-row select{flex:1;min-width:0;font:inherit;padding:4px}
+.tn-row .tn-st{width:22px;text-align:center}
+.tn-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .datamenu>div{position:absolute;right:0;top:100%;z-index:60;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:6px;display:flex;flex-direction:column;min-width:150px;box-shadow:0 6px 20px rgba(0,0,0,.15)}
 .datamenu>div a{padding:8px 12px;text-decoration:none;color:var(--ink);white-space:nowrap;border-radius:6px}
 .datamenu>div a:hover{background:var(--bg)}
@@ -270,6 +289,7 @@ button.mark:hover{background:var(--accent-soft)}
     <a href="#chords" data-nav="chords">Chords</a>
     <a href="#pending" data-nav="pending">To approve<span class="badge" id="pendBadge" hidden>0</span></a>
   </nav>
+  <button type="button" class="tunerbtn" id="tunerBtn" title="Tuner" aria-label="Tuner">🎸<span class="tl"> Tuner</span></button>
   <details class="datamenu"><summary>⋯ Data</summary><div>
     <a href="#" id="importBtn" title="Import marks and song suggestions from a JSON file">Import marks</a>
     <a href="#" id="migrateBtn" title="One-time: move screenshots to their video versions">Move shots</a>
@@ -1795,6 +1815,157 @@ function closeDlg(){ const d=$("#dlg"); if(d.open) d.close(); }
 $("#dlgClose").onclick=closeDlg;
 $("#dlg").addEventListener("click", e=>{ if(e.target.id==="dlg") closeDlg(); });
 $("#dlg").addEventListener("close", ()=>softRefresh());
+
+// ================= tuner (microphone, local pitch detection; nothing is recorded) =================
+const TN_NOTE = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
+const TN_STD = [40,45,50,55,59,64];
+const TN_PRESETS = [
+  ["Standard", [40,45,50,55,59,64]], ["Drop D", [38,45,50,55,59,64]],
+  ["Half step down", [39,44,49,54,58,63]], ["Full step down", [38,43,48,53,57,62]],
+  ["Drop C", [36,43,48,53,57,62]], ["DADGAD", [38,45,50,55,57,62]],
+  ["Open G", [38,43,50,55,59,62]], ["Open D", [38,45,50,54,57,62]], ["Open E", [40,47,52,56,59,64]],
+];
+const tnName = m => TN_NOTE[((m%12)+12)%12] + (Math.floor(m/12)-1);
+const tnHz = m => 440*Math.pow(2,(m-69)/12);
+let TN = null;   // {stream, ac, an, buf, timer, tune[6], lock, hist[], okRun, ok[6]}
+
+function tnLoad(){
+  try{ const t=JSON.parse(localStorage.getItem("songbook-tuner")||"null"); if(Array.isArray(t)&&t.length===6&&t.every(x=>Number.isInteger(x)&&x>=24&&x<=80)) return t; }catch(_){}
+  return TN_STD.slice();
+}
+function tnSave(t){ try{ localStorage.setItem("songbook-tuner", JSON.stringify(t)); }catch(_){} }
+
+// a song's "Tuning" text -> six MIDI notes (low to high), or null when it can't be read
+function tnParse(s){
+  s=String(s||"").trim(); if(!s) return null;
+  const low=s.toLowerCase().replace(/\s+/g," ");
+  for(const [n,t] of TN_PRESETS) if(low===n.toLowerCase()) return t.slice();
+  if(/^(e )?standard( tuning)?$/.test(low)) return TN_STD.slice();
+  if(/half[ -]?step down|^e[b♭] standard|^d# standard/.test(low)) return TN_STD.map(m=>m-1);
+  if(/(full|whole)[ -]?step down|^d standard/.test(low)) return TN_STD.map(m=>m-2);
+  const toks=[...s.matchAll(/([A-G]|e)(#|♯|b|♭)?/g)];
+  if(toks.length!==6) return null;
+  return toks.map((k,i)=>{
+    const pc=(NOTE_PC[k[1].toUpperCase()]+(k[2]==="#"||k[2]==="♯"?1:k[2]?-1:0)+12)%12;
+    let best=null; for(let m=TN_STD[i]-7;m<=TN_STD[i]+4;m++) if(((m%12)+12)%12===pc && (best===null||Math.abs(m-TN_STD[i])<Math.abs(best-TN_STD[i]))) best=m;
+    return best;
+  });
+}
+
+// YIN pitch estimate on a time-domain frame; returns Hz or 0
+function tnPitch(buf, sr){
+  let rms=0; for(let i=0;i<buf.length;i++) rms+=buf[i]*buf[i];
+  if(Math.sqrt(rms/buf.length) < 0.006) return 0;
+  const W=Math.floor(buf.length/2), tmin=Math.floor(sr/1000), tmax=Math.min(W-2, Math.ceil(sr/55));
+  const d=new Float32Array(tmax+2);
+  for(let tau=1;tau<=tmax+1;tau++){ let s=0; for(let i=0;i<W;i++){ const x=buf[i]-buf[i+tau]; s+=x*x; } d[tau]=s; }
+  let run=0; d[0]=1; for(let tau=1;tau<=tmax+1;tau++){ run+=d[tau]; d[tau]=run? d[tau]*tau/run : 1; }
+  let tau=-1;
+  for(let t=tmin;t<=tmax;t++){ if(d[t]<0.15){ while(t+1<=tmax && d[t+1]<d[t]) t++; tau=t; break; } }
+  if(tau<0) return 0;
+  const a=d[tau-1], b=d[tau], c=d[tau+1], den=a-2*b+c;
+  const shift = den ? 0.5*(a-c)/den : 0;
+  return sr/(tau+Math.max(-1,Math.min(1,shift)));
+}
+
+function tunerRowsHTML(){
+  const opts = sel => { let h=""; for(let m=28;m<=76;m++) h+=`<option value="${m}"${m===sel?" selected":""}>${tnName(m)}</option>`; return h; };
+  return TN.tune.map((m,i)=>i).reverse().map(i=>`<div class="tn-row${TN.lock===i?" on":""}" data-tnrow="${i}">
+      <b title="Click to tune only this string">${6-i}${["st","nd","rd","th","th","th"][5-i]} string</b>
+      <select data-tnsel="${i}" aria-label="Note for string ${6-i}">${opts(TN.tune[i])}</select>
+      <button type="button" class="btn small ghost" data-tnplay="${i}" title="Play this note">♪</button>
+      <span class="tn-st" id="tnSt${i}">${TN.ok[i]?"✓":""}</span></div>`).join("");
+}
+function tunerPresetVal(){ const p=TN_PRESETS.find(([,t])=>t.every((m,i)=>m===TN.tune[i])); return p?p[0]:""; }
+function tunerTools(){
+  const song=curSong(), st=song&&tnParse(song.tuning);
+  const pv=tunerPresetVal();
+  return `<select id="tnPreset" aria-label="Preset tuning"><option value="">${pv?"":"Custom"}</option>${TN_PRESETS.map(([n,t])=>`<option${n===pv?" selected":""}>${n}</option>`).join("")}</select>
+    ${st && st.some((m,i)=>m!==TN.tune[i]) ? `<button type="button" class="btn small" id="tnSong">Use this song's tuning (${esc(song.tuning)})</button>`:""}
+    <span class="muted" style="font-size:12px">Click a string's name to tune only that string. Click it again for automatic.</span>`;
+}
+function tunerRedraw(){ const r=$("#tnRows"), t=$("#tnTools"); if(r) r.innerHTML=tunerRowsHTML(); if(t) t.innerHTML=tunerTools(); }
+function tunerSet(t){ TN.tune=t.slice(); TN.ok=[0,0,0,0,0,0]; TN.hist=[]; tnSave(TN.tune); tunerRedraw(); }
+
+async function openTuner(){
+  tunerStop();
+  TN = { tune: tnLoad(), lock:-1, hist:[], okRun:0, ok:[0,0,0,0,0,0] };
+  openDlg("Tuner", `<div class="tn-read"><div class="tn-note" id="tnNote">–</div><div class="tn-sub" id="tnSub">Starting the microphone…</div></div>
+    <div class="tn-meter"><div class="tn-needle" id="tnNeedle"></div></div>
+    <div class="tn-scale"><span>♭ −50</span><span>0</span><span>+50 ♯</span></div>
+    <div class="tn-rows" id="tnRows">${tunerRowsHTML()}</div>
+    <div class="tn-tools" id="tnTools">${tunerTools()}</div>
+    <p class="help">The sound is analysed on this computer and never saved. Your tuning is remembered in this browser.</p>`);
+  const body=$("#dlgBody");
+  body.onchange = e => {
+    const s=e.target.closest("[data-tnsel]");
+    if(s){ const t=TN.tune.slice(); t[+s.dataset.tnsel]=+s.value; tunerSet(t); return; }
+    if(e.target.id==="tnPreset" && e.target.value){ const p=TN_PRESETS.find(([n])=>n===e.target.value); if(p) tunerSet(p[1]); }
+  };
+  body.onclick = e => {
+    const p=e.target.closest("[data-tnplay]");
+    if(p){ tnTone(TN.tune[+p.dataset.tnplay]); return; }
+    if(e.target.id==="tnSong"){ const t=tnParse((curSong()||{}).tuning); if(t) tunerSet(t); return; }
+    const b=e.target.closest(".tn-row b");
+    if(b){ const i=+b.parentElement.dataset.tnrow; TN.lock = TN.lock===i ? -1 : i; TN.hist=[]; tunerRedraw(); }
+  };
+  $("#dlg").addEventListener("close", tunerStop, {once:true});
+  const me=TN;
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}});
+    if(TN!==me){ stream.getTracks().forEach(t=>t.stop()); return; }
+    const ac=new (window.AudioContext||window.webkitAudioContext)();
+    if(ac.state==="suspended") await ac.resume().catch(()=>{});
+    const an=ac.createAnalyser(); an.fftSize=4096;
+    ac.createMediaStreamSource(stream).connect(an);
+    Object.assign(TN, {stream, ac, an, buf:new Float32Array(an.fftSize)});
+    $("#tnSub").textContent="Play one string";
+    TN.timer=setInterval(tunerTick, 60);
+  }catch(err){
+    const s=$("#tnSub"); if(s) s.textContent = err && err.name==="NotAllowedError" ? "Microphone blocked. Allow it from the 🔒 icon in the address bar and open the tuner again." : "No microphone found ("+(err&&err.message||err)+")";
+  }
+}
+
+function tunerStop(){
+  if(!TN) return;
+  clearInterval(TN.timer);
+  if(TN.stream) TN.stream.getTracks().forEach(t=>t.stop());
+  if(TN.ac) TN.ac.close().catch(()=>{});
+  TN=null;
+}
+
+function tnTone(m){
+  try{ const ac=ctx(), t=ac.currentTime+0.02, o=ac.createOscillator(), g=ac.createGain();
+    o.type="triangle"; o.frequency.value=tnHz(m);
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.3,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+2);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t+2.05); }catch(_){}
+}
+
+function tunerTick(){
+  const note=$("#tnNote");
+  if(!TN || !note){ tunerStop(); return; }
+  TN.an.getFloatTimeDomainData(TN.buf);
+  const f=tnPitch(TN.buf, TN.ac.sampleRate);
+  const sub=$("#tnSub"), nd=$("#tnNeedle");
+  if(!f){ if(TN.hist.length && ++TN.quiet>6){ TN.hist=[]; } if(!TN.hist.length){ sub.textContent="Play one string"; nd.classList.remove("ok"); note.classList.remove("ok"); } return; }
+  TN.quiet=0;
+  const midiF=69+12*Math.log2(f/440);
+  // which string: the locked one, or the one whose target is nearest
+  let si=TN.lock;
+  if(si<0){ let bd=1e9; TN.tune.forEach((m,i)=>{ const dd=Math.abs(midiF-m); if(dd<bd){ bd=dd; si=i; } }); }
+  if(TN.si!==si){ TN.si=si; TN.hist=[]; document.querySelectorAll(".tn-row").forEach(r=>r.classList.toggle("on", +r.dataset.tnrow===si)); }
+  TN.hist.push(midiF); if(TN.hist.length>5) TN.hist.shift();
+  const sm=TN.hist.slice().sort((a,b)=>a-b)[TN.hist.length>>1];
+  const target=TN.tune[si], cents=(sm-target)*100, ok=Math.abs(cents)<=5;
+  note.textContent=tnName(target); note.classList.toggle("ok", ok);
+  nd.style.left=(50+Math.max(-50,Math.min(50,cents)))+"%"; nd.classList.toggle("ok", ok);
+  const heard=tnName(Math.round(sm));
+  sub.textContent = `${6-si}${["st","nd","rd","th","th","th"][5-si]} string · hearing ${heard} (${(440*Math.pow(2,(sm-69)/12)).toFixed(1)} Hz) · ` +
+    (ok ? "in tune ✓" : (cents<0 ? "too low, tighten" : "too high, loosen") + ` (${cents>0?"+":""}${Math.round(cents)} cents)`);
+  TN.okRun = ok ? TN.okRun+1 : 0;
+  if(TN.okRun>=6 && !TN.ok[si]){ TN.ok[si]=1; const e=$("#tnSt"+si); if(e) e.textContent="✓"; }
+}
+$("#tunerBtn").onclick = openTuner;
 
 window.startApp = init;
 
