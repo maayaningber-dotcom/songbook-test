@@ -45,6 +45,12 @@ h1,h2,h3{font-family:var(--font-display);font-stretch:85%;text-wrap:balance;marg
 .top .wrap{display:flex;align-items:center;gap:16px;height:56px}
 .brand{font-family:var(--font-display);font-weight:800;font-stretch:80%;font-size:20px;letter-spacing:.01em;display:flex;align-items:center;gap:8px;text-decoration:none;color:var(--ink)}
 .brand svg{flex:none}
+.datamenu{position:relative;flex:none}
+.datamenu summary{list-style:none;cursor:pointer;padding:7px 12px;border-radius:999px;color:var(--muted);font-weight:500;white-space:nowrap}
+.datamenu summary::-webkit-details-marker{display:none}
+.datamenu>div{position:absolute;right:0;top:100%;z-index:60;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:6px;display:flex;flex-direction:column;min-width:150px;box-shadow:0 6px 20px rgba(0,0,0,.15)}
+.datamenu>div a{padding:8px 12px;text-decoration:none;color:var(--ink);white-space:nowrap;border-radius:6px}
+.datamenu>div a:hover{background:var(--bg)}
 nav.tabs{display:flex;gap:4px;margin-left:auto;overflow-x:auto}
 nav.tabs a{padding:7px 12px;border-radius:999px;text-decoration:none;color:var(--muted);font-weight:500;white-space:nowrap}
 nav.tabs a[aria-current="page"]{background:var(--ink);color:var(--surface)}
@@ -253,10 +259,12 @@ button.mark:hover{background:var(--accent-soft)}
     <a href="#library" data-nav="library">Songs</a>
     <a href="#chords" data-nav="chords">Chords</a>
     <a href="#pending" data-nav="pending">To approve<span class="badge" id="pendBadge" hidden>0</span></a>
+  </nav>
+  <details class="datamenu"><summary>⋯ Data</summary><div>
     <a href="#" id="importBtn" title="Import marks and song suggestions from a JSON file">Import marks</a>
     <a href="#" id="migrateBtn" title="One-time: move screenshots to their video versions">Move shots</a>
     <a href="#" id="exportBtn" title="Download a JSON backup of all data">Export data</a>
-  </nav>
+  </div></details>
 </div></header>
 
 <main><div class="wrap" id="view"><p class="muted">Loading your songs…</p></div></main>
@@ -1248,7 +1256,7 @@ function openImportDialog(){
     };
   };
 }
-document.getElementById("importBtn").onclick=e=>{ e.preventDefault(); openImportDialog(); };
+document.getElementById("importBtn").onclick=e=>{ e.preventDefault(); e.target.closest("details").open=false; openImportDialog(); };
 async function removeShot(song, key, assetId){
   for(const {song:s, h} of holdersFor(song,key)){ h.shots=(h.shots||[]).filter(a=>a.assetId!==assetId); await saveSong(s); }
   try{ await S.assets.delete(assetId); }catch(e){}
