@@ -1216,7 +1216,7 @@ function planImport(data){
     const pend=S.pending.find(p=>p.type==="identify" && p.sourceUrl && codes.includes(codeOf({kind:srcKind(p.sourceUrl), url:p.sourceUrl})));
     const idf=r.identify && (r.identify.title||r.identify.artist||r.identify.note) ? {title:String(r.identify.title||"").slice(0,120), artist:String(r.identify.artist||"").slice(0,120), note:String(r.identify.note||"").slice(0,400)} : null;
     if(!targets.length && !(pend&&idf)){ errs.push("Reel "+(r.code||r.url)+": not found in any song"+(idf?" or pending item":"")+"."); continue; }
-    items.push({code:String(r.code||r.url), targets, pend:(pend&&idf)?pend:null, idf, nMarks:marks.length});
+    items.push({code:String(r.code||r.url), targets, pend:(pend&&idf)?pend:null, idf, nMarks:marks.length, marks});
   }
   return {errs, items};
 }
@@ -1241,7 +1241,7 @@ function openImportDialog(){
       try{
         for(const it of plan.items){
           for(const t of it.targets){ if(!t.add.length) continue; t.src.marks=(t.src.marks||[]).concat(t.add); await saveSong(t.song); }
-          if(it.pend && S.db){ const {id, ...rest}=it.pend; const up=Object.assign({}, rest, {guessTitle:it.idf.title||rest.guessTitle||"", guessArtist:it.idf.artist||rest.guessArtist||"", message:it.idf.note||rest.message||""}); Object.assign(it.pend, up); await S.db.doc("pending/"+id).set(JSON.parse(JSON.stringify(up))); }
+          if(it.pend && S.db){ const {id, ...rest}=it.pend; const up=Object.assign({}, rest, {guessTitle:it.idf.title||rest.guessTitle||"", guessArtist:it.idf.artist||rest.guessArtist||"", message:it.idf.note||rest.message||"", sourceMarks:(rest.sourceMarks||[]).concat(it.marks.filter(m=>!(rest.sourceMarks||[]).some(o=>o.kind===m.kind&&Math.abs(o.t-m.t)<=1)))}); Object.assign(it.pend, up); await S.db.doc("pending/"+id).set(JSON.parse(JSON.stringify(up))); }
         }
         closeDlg(); toast("Imported: "+nAdd+" marks, "+nProp+" suggestions"); route();
       }catch(err){ toast("Import stopped: "+(err.message||err)); }
