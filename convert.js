@@ -173,7 +173,23 @@ function analyseStaff(G, m, st){
   for(const b of realBars) for(let x = b.x0 - 1; x <= b.x1 + 1; x++) for(let y = Math.round(st.y0 - sp*0.3); y <= Math.round(st.y1 + sp*0.3); y++) if(x >= 0 && x < w) mm[y*w+x] = 0;
   // 3. glyphs between first and last line (+ half a gap)
   const by0 = Math.max(0, Math.round(st.y0 - sp * 0.6)), by1 = Math.min(G.h - 1, Math.round(st.y1 + sp * 0.6));
+  // a glyph on one string can touch the glyph on the next string through a bit of kept staff line
+  // (e.g. a 0 above an X in the same column): cut such tall blobs halfway between the lines
+  const mids = []; for(let i = 0; i + 1 < st.lines.length; i++) mids.push((st.lines[i].y + st.lines[i+1].y) / 2);
+  const bandOf = y => { let b = 0; while(b < mids.length && y > mids[b]) b++; return b; };
+  const splitTall = c => {
+    const ch = c.y1 - c.y0 + 1, cw = c.x1 - c.x0 + 1;
+    if(ch <= sp * 1.35 || ch > sp * 2.4 || cw > sp * 1.3 || bandOf(c.y0) === bandOf(c.y1)) return [c];
+    const parts = {};
+    for(const q of c.px){
+      const qx = q % w, qy = (q - qx) / w, b = bandOf(qy);
+      const p = parts[b] || (parts[b] = {x0: qx, x1: qx, y0: qy, y1: qy, n: 0, px: []});
+      p.n++; p.px.push(q); if(qx < p.x0) p.x0 = qx; if(qx > p.x1) p.x1 = qx; if(qy < p.y0) p.y0 = qy; if(qy > p.y1) p.y1 = qy;
+    }
+    return Object.values(parts);
+  };
   const comps = components(mm, w, Math.max(0, st.x0 - 4), by0, Math.min(w - 1, st.x1 + 4), by1)
+    .flatMap(splitTall)
     .filter(c => { const ch = c.y1 - c.y0 + 1, cw = c.x1 - c.x0 + 1; return ch >= sp * 0.35 && ch <= sp * 1.35 && cw <= sp * 1.3 && c.n >= 6; });
   // 4. string of each glyph
   for(const c of comps){
@@ -224,6 +240,33 @@ function groupCanvas(G, g){
   return c;
 }
 
+// shape test for "0": exactly one enclosed hole, sitting in the middle, glyph taller than wide
+function looksLikeZero(g, G){
+  const w = G.w, gw = g.x1 - g.x0 + 1, gh = g.y1 - g.y0 + 1;
+  if(gw < 4 || gw / gh < 0.5 || gw / gh > 1.05) return false;
+  const own = new Set(); for(const part of g.parts) for(const p of part.px) own.add(p);
+  const W = gw + 2, H = gh + 2, bg = new Uint8Array(W * H).fill(1);
+  for(const p of own){ const px = p % w, py = (p - px) / w; bg[(py - g.y0 + 1) * W + (px - g.x0 + 1)] = 0; }
+  const seen = new Uint8Array(W * H); let holes = 0, hy0 = 0, hy1 = 0;
+  for(let i = 0; i < W * H; i++){
+    if(!bg[i] || seen[i]) continue;
+    let touches = false, y0 = H, y1 = 0; const st = [i]; seen[i] = 1;
+    while(st.length){
+      const q = st.pop(), x = q % W, y = (q - x) / W;
+      if(x === 0 || y === 0 || x === W - 1 || y === H - 1) touches = true;
+      if(y < y0) y0 = y; if(y > y1) y1 = y;
+      for(const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        const nx = x + dx, ny = y + dy; if(nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const r = ny * W + nx; if(bg[r] && !seen[r]){ seen[r] = 1; st.push(r); }
+      }
+    }
+    if(!touches){ holes++; hy0 = y0; hy1 = y1; }
+  }
+  if(holes !== 1) return false;
+  const mid = ((hy0 + hy1) / 2 - 1) / gh, hh = (hy1 - hy0 + 1) / gh;
+  return mid > 0.38 && mid < 0.62 && hh > 0.4;
+}
+
 let _lastWords = [];
 const FRET_CHARS = "0123456789hpbrxX/~";
 const isFret = t => /\d/.test(t || "") || t === "x";
@@ -245,6 +288,8 @@ async function readGroups(A, G, onProgress){
     const wide = (g.x1 - g.x0) > (g.y1 - g.y0) * 1.1;   // probably two characters, e.g. 12
     const r = await ocrGlyph(wk, c, wide ? ["7", "8", "13"] : ["10", "8", "7", "13"]);
     g.text = r.text; g.conf = r.conf;
+    // OCR sometimes gives nothing for a clean "0": a tall oval with one centred hole is a zero
+    if(!g.text && looksLikeZero(g, G)){ g.text = "0"; g.conf = 50; }
     if(onProgress) onProgress(++i, A.groups.length);
   }
   // two-digit frets whose digits were read apart: "1" right next to a digit on the same string -> "12"
