@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Songbook – העברת נתונים ל-Firestore</title>
+<style>
+  body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0;padding:18px;background:#14161a;color:#e8e8e8;max-width:820px;margin-inline:auto}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:#9aa;font-size:13px;margin-bottom:14px}
+  .card{background:#1d2026;border:1px solid #2b3039;border-radius:10px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:15px;margin:0 0 8px}
+  button{font:inherit;padding:8px 14px;border-radius:8px;border:1px solid #3a414d;background:#262b33;color:#eee;cursor:pointer}
+  button.primary{background:#2d6cdf;border-color:#2d6cdf}
+  button:disabled{opacity:.45;cursor:default}
+  textarea{width:100%;min-height:140px;direction:ltr;font:12px Consolas,monospace;background:#0c0e11;color:#cde;border:1px solid #2b3039;border-radius:8px;padding:8px;box-sizing:border-box}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+  #log{direction:ltr;text-align:left;white-space:pre-wrap;font:12px/1.5 Consolas,monospace;background:#0c0e11;border-radius:8px;padding:10px;max-height:340px;overflow:auto}
+  .ok{color:#6fdc8c}.warn{color:#ffc857}.err{color:#ff6b6b}
+  table{border-collapse:collapse;width:100%;font-size:14px}
+  td,th{border-bottom:1px solid #2b3039;padding:5px 8px;text-align:right}
+  .muted{color:#9aa;font-size:13px}
+</style>
+</head>
+<body>
+<h1>העברת הנתונים ל-Firestore</h1>
+<div class="sub">חד-פעמי. הדף כותב את כל השירים, הרילסים הממתינים וגרסאות ה-UG ל-Firebase, ואז בודק שהכול הגיע.</div>
+
+<div class="card">
+  <h2>1. התחברות</h2>
+  <div class="row"><button class="primary" id="signin">התחבר עם Google</button><span id="who" class="muted">לא מחובר</span></div>
+</div>
+
+<div class="card">
+  <h2>2. הדבק את הייצוא מהדשבורד הישן</h2>
+  <div class="muted">בדשבורד הישן: Songs ← Export data ← Ctrl+A, Ctrl+C. אחר כך הדבק כאן. (או בחר קובץ JSON.)</div>
+  <textarea id="data" placeholder="הדבק כאן את ה-JSON" spellcheck="false"></textarea>
+  <div class="row"><input type="file" id="file" accept=".json,application/json"><span id="parsed" class="muted"></span></div>
+</div>
+
+<div class="card">
+  <h2>3. ייבוא ואימות</h2>
+  <div class="row"><button class="primary" id="go" disabled>ייבא ל-Firestore</button><button id="verify" disabled>בדוק מה יש ב-Firestore</button><button id="copy">העתק דו"ח</button></div>
+  <table id="tbl"><thead><tr><th>אוסף</th><th>בייצוא</th><th>ב-Firestore</th><th>חסרים</th><th>סטטוס</th></tr></thead><tbody></tbody></table>
+  <div id="log"></div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, doc, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCvemrso6CIlHUepM356UdzjAlrn8Ihq3Y",
+  authDomain: "songbook-32ca5.firebaseapp.com",
+  projectId: "songbook-32ca5",
+  storageBucket: "songbook-32ca5.firebasestorage.app",
+  messagingSenderId: "667335772669",
+  appId: "1:667335772669:web:e43a967e829429f7bdb194"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const $ = id => document.getElementById(id);
+const COLS = ["songs","pending","ugv"];
+let parsed = null, user = null;
+const reportLines = [];
+
+function log(cls, msg){
+  const d = document.createElement('div'); d.className = cls; d.textContent = msg;
+  $('log').appendChild(d); $('log').scrollTop = $('log').scrollHeight;
+  reportLines.push(msg);
+}
+
+function refreshButtons(){
+  $('go').disabled = !(user && parsed);
+  $('verify').disabled = !user;
+}
+
+onAuthStateChanged(auth, u => {
+  user = u;
+  $('who').textContent = u ? `מחובר: ${u.email}` : 'לא מחובר';
+  if(u) log('ok', 'מחובר כ-' + u.email);
+  refreshButtons();
+});
+
+$('signin').onclick = async () => {
+  try { await signInWithPopup(auth, new GoogleAuthProvider()); }
+  catch(e){ log('err', 'התחברות נכשלה: ' + e.code + ' ' + e.message); }
+};
+
+function parseInput(txt){
+  try{
+    const j = JSON.parse(txt);
+    for(const c of COLS) if(!Array.isArray(j[c])) throw new Error('חסר אוסף ' + c);
+    parsed = j;
+    $('parsed').textContent = `נקרא: ${j.songs.length} שירים, ${j.pending.length} pending, ${j.ugv.length} ugv`;
+    $('parsed').className = 'muted ok';
+    renderTable();
+  }catch(e){
+    parsed = null;
+    $('parsed').textContent = 'JSON לא תקין: ' + e.message;
+    $('parsed').className = 'muted err';
+  }
+  refreshButtons();
+}
+$('data').addEventListener('input', e => parseInput(e.target.value));
+$('file').addEventListener('change', async e => {
+  const f = e.target.files[0]; if(!f) return;
+  const txt = await f.text(); $('data').value = txt; parseInput(txt);
+});
+
+function renderTable(counts){
+  const tb = $('tbl').querySelector('tbody'); tb.innerHTML = '';
+  for(const c of COLS){
+    const exp = parsed ? parsed[c].length : '—';
+    const got = counts && counts[c] ? counts[c].size : '—';
+    let missing = '—', status = '';
+    if(parsed && counts && counts[c]){
+      const m = parsed[c].filter(x => !counts[c].has(x.id)).map(x => x.id);
+      missing = m.length ? m.join(', ') : '0';
+      status = m.length ? '✗' : '✓';
+    }
+    tb.insertAdjacentHTML('beforeend', `<tr><td>${c}</td><td>${exp}</td><td>${got}</td><td style="direction:ltr;text-align:left">${missing}</td><td>${status}</td></tr>`);
+  }
+}
+
+async function readAll(){
+  const out = {};
+  for(const c of COLS){
+    const snap = await getDocs(collection(db, c));
+    out[c] = new Map(snap.docs.map(d => [d.id, d.data()]));
+  }
+  return out;
+}
+
+$('verify').onclick = async () => {
+  try{
+    const counts = await readAll();
+    renderTable(counts);
+    log('ok', 'ב-Firestore: ' + COLS.map(c => `${c}=${counts[c].size}`).join(', '));
+  }catch(e){ log('err', 'קריאה נכשלה: ' + e.code + ' ' + e.message); }
+};
+
+$('go').onclick = async () => {
+  $('go').disabled = true;
+  try{
+    for(const c of COLS){
+      const items = parsed[c];
+      let done = 0;
+      for(let i = 0; i < items.length; i += 400){
+        const batch = writeBatch(db);
+        for(const it of items.slice(i, i + 400)){
+          if(!it.id) throw new Error('מסמך בלי id באוסף ' + c);
+          batch.set(doc(db, c, it.id), it.data);
+        }
+        await batch.commit();
+        done += Math.min(400, items.length - i);
+        log('', `${c}: נכתבו ${done}/${items.length}`);
+      }
+      log('ok', `${c}: הסתיים (${items.length})`);
+    }
+    const counts = await readAll();
+    renderTable(counts);
+    let allOk = true;
+    for(const c of COLS){
+      const miss = parsed[c].filter(x => !counts[c].has(x.id));
+      if(miss.length){ allOk = false; log('err', `${c}: חסרים ${miss.length}: ${miss.map(x=>x.id).join(', ')}`); }
+      // השוואת תוכן: מספר רילסים/גרסאות בכל שיר
+      if(c === 'songs'){
+        let diffs = 0;
+        for(const s of parsed.songs){
+          const got = counts.songs.get(s.id); if(!got) continue;
+          const a = (s.data.sources||[]).length, b = (got.sources||[]).length;
+          const x = (s.data.sheets||[]).length, y = (got.sheets||[]).length;
+          if(a !== b || x !== y){ diffs++; log('err', `שיר ${s.id}: sources ${a}→${b}, sheets ${x}→${y}`); }
+        }
+        if(diffs) allOk = false;
+        const ig = parsed.songs.reduce((n,s) => n + (s.data.sources||[]).filter(r => r.kind === 'instagram').length, 0);
+        const igGot = [...counts.songs.values()].reduce((n,s) => n + (s.sources||[]).filter(r => r.kind === 'instagram').length, 0);
+        log(ig === igGot ? 'ok' : 'err', `רילסים של אינסטגרם בשירים: ייצוא ${ig}, Firestore ${igGot}`);
+        const pendIg = parsed.pending.length;
+        log('', `רילסים ממתינים (pending): ${pendIg}  ·  סה"כ רילסים = ${ig + pendIg} (ציפייה: 44)`);
+        if(ig !== igGot) allOk = false;
+      }
+    }
+    log(allOk ? 'ok' : 'err', allOk ? '✓ הכול הגיע ותואם לייצוא.' : '✗ יש הבדלים. שלח לי את הדו"ח.');
+  }catch(e){
+    log('err', 'הייבוא נכשל: ' + (e.code || '') + ' ' + e.message);
+  }
+  $('go').disabled = false;
+};
+
+$('copy').onclick = async () => {
+  const txt = `origin: ${location.origin}\nuser: ${user ? user.email : '-'}\n` + reportLines.join('\n');
+  try{ await navigator.clipboard.writeText(txt); log('ok', 'הדו"ח הועתק'); }
+  catch(e){ log('err', 'ההעתקה נכשלה: ' + e.message); }
+};
+renderTable();
+refreshButtons();
+</script>
+</body>
+</html>
