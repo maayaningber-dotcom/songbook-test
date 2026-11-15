@@ -190,6 +190,10 @@ textarea.notes{width:100%;min-height:80px;padding:10px;border:1px solid var(--li
 .vcard .lbl{font-size:11px;color:var(--muted);text-align:center}
 .vcard .frets{font-family:var(--font-mono);font-size:12px}
 .vcard.first{border-color:var(--accent)}
+.vwrap{display:flex;flex-direction:column;gap:4px}
+.vwrap .vcard{flex:1}
+.vcard.mine{border:2px solid var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface))}
+.vwrap .vuse{font-size:11px;padding:2px 4px}
 .picker{display:flex;flex-direction:column;gap:10px;margin-bottom:16px}
 .keys{display:flex;flex-wrap:wrap;gap:4px}
 .keys button{min-width:42px;padding:6px 8px;border:1px solid var(--line);background:var(--surface);border-radius:6px;cursor:pointer;font-family:var(--font-mono);font-weight:600}
@@ -907,7 +911,7 @@ function renderSong(v, id){
     <div>
       <section class="panel">
         <h2>Chords in this song <span class="muted" style="font-size:13px;font-family:var(--font-body);font-weight:400">tap for every way to play it</span></h2>
-        ${chords.length ? `<div class="strip">${chords.map(c=>{ const tc=tChord(c,n+(_cur&&chordsOfText(_cur.text).length?((+_cur.capo||0)-(+song.capo||0)):0),flats); const vv=generateVoicings(tc)[0]; return `<button class="mini" data-chord="${esc(tc)}">${vv?diagram(vv,{w:70,gy:12,fingers:false}):""}<b>${esc(tc)}</b></button>`; }).join("")}</div>` : `<p class="empty-sheet">No chords yet.</p>`}
+        ${chords.length ? `<div class="strip">${chords.map(c=>{ const tc=tChord(c,n+(_cur&&chordsOfText(_cur.text).length?((+_cur.capo||0)-(+song.capo||0)):0),flats); const vv=pickedVoicing(tc, song); return `<button class="mini" data-chord="${esc(tc)}">${vv?diagram(vv,{w:70,gy:12,fingers:false}):""}<b>${esc(tc)}</b></button>`; }).join("")}</div>` : `<p class="empty-sheet">No chords yet.</p>`}
       </section>
       ${(song.shots||[]).length?`<section class="panel">
         <h2>Screenshots not in a version yet</h2>
@@ -1337,8 +1341,24 @@ function openSourceEditor(song, src){
 }
 
 // ================= voicings =================
+// per-song chosen shape: song.voicings = { "Am": "x,0,2,2,1,0", ... }
+const _vgCache = new Map();
+function voicingsOf(sym){ let a=_vgCache.get(sym); if(!a){ a=generateVoicings(sym); _vgCache.set(sym,a); } return a; }
+function curSong(){ return location.hash.startsWith("#song-") ? S.songs.get(S.songId) : null; }
+function pickedVoicing(sym, song){
+  const all=voicingsOf(sym); song = song===undefined ? curSong() : song;
+  const fr = song && song.voicings && song.voicings[sym];
+  if(fr){ const v=all.find(x=>x.frets.join(",")===fr); if(v) return v; }
+  return all[0]||null;
+}
+async function setSongVoicing(song, sym, fr){
+  song.voicings = Object.assign({}, song.voicings||{});
+  if(fr) song.voicings[sym]=fr; else delete song.voicings[sym];
+  await saveSong(song);
+}
 function voicingGridHTML(sym, filter){
-  const all = generateVoicings(sym);
+  const all = voicingsOf(sym);
+  const song = curSong(), mine = song && song.voicings && song.voicings[sym];
   const list = filter==="all" ? all : all.filter(v=>v.kind===filter);
   const counts = {all:all.length}; all.forEach(v=>counts[v.kind]=(counts[v.kind]||0)+1);
   const p = parseChord(sym);
@@ -1351,11 +1371,19 @@ function voicingGridHTML(sym, filter){
     <div class="seg" role="group" aria-label="Filter shapes" style="margin-bottom:12px">
       ${["all","open","barre","moveable","compact"].filter(k=>k==="all"||counts[k]).map(k=>`<button data-vf="${k}" aria-pressed="${filter===k}">${k==="all"?"All":KIND_LABEL[k]} <span class="muted">${counts[k]}</span></button>`).join("")}
     </div>
-    ${list.length?`<div class="vgrid">${list.map((v,i)=>`<button class="vcard ${i===0&&filter==="all"?"first":""}" data-fr="${v.frets.join(",")}" title="${esc(vLabel(v))}">${diagram(v)}<span class="frets">${v.frets.map(f=>f<0?"x":f).join(" ")}</span><span class="lbl">${i===0&&filter==="all"?"<b>Most common</b> · ":""}${esc(vLabel(v))}</span></button>`).join("")}</div>`:`<p class="muted">No playable shapes found for this chord name.</p>`}`;
+    ${song?`<p class="muted" style="margin:0 0 10px">${mine?`This song uses your chosen shape (✓). <button class="btn small ghost" data-vuse="">↺ Back to most common</button>`:`Press “Use in this song” under a shape to see it whenever you hover ${esc(sym)} in “${esc(song.title)}”.`}</p>`:""}
+    ${list.length?`<div class="vgrid">${list.map((v,i)=>{ const fr=v.frets.join(","), isMine=song&&(mine?mine===fr:(i===0&&filter==="all")); return `<div class="vwrap"><button class="vcard ${i===0&&filter==="all"&&!mine?"first":""} ${mine===fr?"mine":""}" data-fr="${fr}" title="${esc(vLabel(v))}">${diagram(v)}<span class="frets">${v.frets.map(f=>f<0?"x":f).join(" ")}</span><span class="lbl">${mine===fr?"<b>✓ In this song</b> · ":i===0&&filter==="all"?"<b>Most common</b> · ":""}${esc(vLabel(v))}</span></button>${song&&!isMine?`<button class="btn small ghost vuse" data-vuse="${fr}">Use in this song</button>`:""}</div>`; }).join("")}</div>`:`<p class="muted">No playable shapes found for this chord name.</p>`}`;
 }
 function wireVoicings(root, sym, rerender){
   root.querySelectorAll("[data-vf]").forEach(b=>b.onclick=()=>{ S.vfilter=b.dataset.vf; rerender(); });
   root.querySelectorAll("[data-fr]").forEach(b=>b.onclick=()=>strum(b.dataset.fr.split(",").map(Number)));
+  root.querySelectorAll("[data-vuse]").forEach(b=>b.onclick=async()=>{
+    const song=curSong(); if(!song) return;
+    const fr=b.dataset.vuse;
+    try{ await setSongVoicing(song, sym, fr||null); toast(fr?"Shape saved for “"+song.title+"”":"Back to the most common shape"); }
+    catch(e){ toast("Couldn't save the shape"); }
+    rerender(); route();
+  });
 }
 function openVoicings(sym){
   S.vfilter="all";
@@ -1585,7 +1613,7 @@ const hoverable = window.matchMedia("(hover: hover) and (pointer: fine)").matche
 const popCache = new Map();
 function showPop(el){
   const sym = el.dataset.chord; if(!sym) return;
-  let v = popCache.get(sym); if(v===undefined){ v = generateVoicings(sym)[0]||null; popCache.set(sym, v); }
+  const v = pickedVoicing(sym);
   const pop=$("#pop");
   pop.innerHTML = `<b>${esc(sym)}</b>` + (v ? diagram(v,{w:96,gy:15}) + `<div class="frets">${v.frets.map(f=>f<0?"x":f).join(" ")}</div>` : `<div class="frets">no shape found</div>`);
   pop.style.display="block";
