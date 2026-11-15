@@ -190,6 +190,12 @@ textarea.notes{width:100%;min-height:80px;padding:10px;border:1px solid var(--li
 .vcard .lbl{font-size:11px;color:var(--muted);text-align:center}
 .vcard .frets{font-family:var(--font-mono);font-size:12px}
 .vcard.first{border-color:var(--accent)}
+.cvlist{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}
+.cvshot{margin:0;width:220px}
+.cvshot canvas{width:100%;height:auto;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+.cvshot figcaption{font-size:12px;color:var(--muted)}
+.cvout label{display:block;margin-top:10px}
+.cvout textarea{display:block;width:100%;min-height:150px;margin-top:4px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font-family:var(--font-mono);font-size:13px;white-space:pre;overflow-x:auto}
 .vwrap{display:flex;flex-direction:column;gap:4px}
 .vwrap .vcard{flex:1}
 .vcard.mine{border:2px solid var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface))}
@@ -579,6 +585,7 @@ function cleanSheet(raw){
 if(typeof module!=="undefined") module.exports = {cleanSheet, sectionHeader};
 
 </script>
+<script src="convert.js"></script>
 <script>
 "use strict";
 // ================= state =================
@@ -971,6 +978,7 @@ function renderSong(v, id){
   v.querySelectorAll("[data-srcver]").forEach(b=>b.onclick=()=>{ S.srcVer=b.dataset.srcver; S.sheetId=null; if(DK.songId!==song.id||DK.srcId!==S.srcVer) dockOpen(song, S.srcVer); route(); });
   const addShotsV=$("#addShotsVer"); if(addShotsV) addShotsV.onclick=async()=>{ migrate(song); const sh={id:uid(), kind:"tab", label:"Screenshots", text:"", capo:+song.capo||0, shots:[]}; song.sheets=song.sheets.concat([sh]); S.sheetId=sh.id; await saveSong(song); route(); };
   v.querySelectorAll("[data-editsheet]").forEach(b=>b.onclick=()=>openSheetDialog(song, getSheets(song).find(x=>x.id===b.dataset.editsheet)));
+  v.querySelectorAll("[data-convert]").forEach(b=>b.onclick=()=>openConvertDialog(song, b.dataset.convert));
   const gm=$("#goMigrate"); if(gm) gm.onclick=e=>{ e.preventDefault(); openMigrateDialog(); };
   v.querySelectorAll("input[data-up]").forEach(inp=>inp.onchange = e => uploadFiles(song, [...e.target.files], inp.dataset.up));
   v.querySelectorAll("[data-shot-del]").forEach(b=>b.onclick=async()=>{
@@ -1007,7 +1015,7 @@ function sheetTabsHTML(song, n, flats, heb){
       <div class="sheetbar"><span class="muted" style="font-size:12px">${esc(info)}${cur.url?` · <a href="${esc(cur.url)}" target="_blank" rel="noopener">original</a>`:""}</span>
         <span class="row" style="gap:6px"><a class="btn small" href="${ug}" target="_blank" rel="noopener">Find on UG</a>${heb?`<a class="btn small" href="${t4u}" target="_blank" rel="noopener">Find on Tab4u</a>`:""}<button class="btn small" id="editCurSheet" data-id="${esc(cur.id)}">Edit</button></span></div>
       ${(cur.text||"").trim()?fullSheetHTML(cur.text, rtl, nn, flats, cur.kind):""}
-      ${(cur.shots&&(cur.shots.length||!(cur.text||"").trim()))?`<h3 class="vh">Screenshots ${uploadBtn("sheet:"+cur.id)}</h3>${shotsHTML(cur.shots,"sheet:"+cur.id)}`:""}
+      ${(cur.shots&&(cur.shots.length||!(cur.text||"").trim()))?`<h3 class="vh">Screenshots ${uploadBtn("sheet:"+cur.id)}</h3>${shotsHTML(cur.shots,"sheet:"+cur.id)}${convertBtnHTML(cur.shots,"sheet:"+cur.id)}`:""}
     </section>`;
 }
 function videoPanelHTML(song, src, n, flats){
@@ -1020,8 +1028,89 @@ function videoPanelHTML(song, src, n, flats){
     <h3 class="vh">Screenshots ${uploadBtn(key)}</h3>
     ${shotsHTML(src.shots, key)}
     ${mine.map(sh=>`<h3 class="vh">${sheetName(sheets, sh)}${sh.auto?` <span class="badge" style="position:static">draft</span>`:""} <button class="btn small ghost" data-editsheet="${esc(sh.id)}">Edit</button></h3>${fullSheetHTML(sh.text, song.lang==="he"&&sh.kind!=="tab", n+((+sh.capo||0)-(+song.capo||0)), flats, sh.kind)}`).join("")}
-    ${(src.shots||[]).length?`<p class="muted" style="margin:12px 0 0;font-size:13px">Convert screenshots to chords/tab: coming in a later phase. Until then the screenshots above are this version's tab.</p>`:""}
+    ${convertBtnHTML(src.shots, key)}
   </section>`;
+}
+// ================= convert screenshots -> tab / chords (local OCR, convert.js) =================
+function convertBtnHTML(shots, key){
+  if(!(shots||[]).length || !window.SongbookConvert) return "";
+  return `<div class="row" style="margin-top:12px;gap:8px;align-items:center"><button class="btn small primary" data-convert="${esc(key)}">🔎 Convert screenshots to tab / chords</button><span class="muted" style="font-size:12px">Runs on your computer. You check and fix the result before it's saved.</span></div>`;
+}
+async function openConvertDialog(song, key){
+  const holder=holderOf(song, key); if(!holder) return;
+  const shots=(holder.shots||[]).slice().sort((a,b)=>(a.t??1e9)-(b.t??1e9));
+  if(!shots.length){ toast("No screenshots in this version"); return; }
+  let cancelled=false;
+  openDlg("Convert screenshots", `
+    <p class="help">Reading ${shots.length} screenshot${shots.length>1?"s":""} on this computer: finds the 6 tab lines and the numbers on them, and chord names written on screen. Orange boxes = numbers it read, grey = something it couldn't read. Fix anything wrong in the boxes below, then save.</p>
+    <div class="status-line" id="cvSt">Loading the reader (first time takes a few seconds)…</div>
+    <div class="cvlist" id="cvList"></div>
+    <div class="cvout" id="cvOut" hidden>
+      <label><b>Tab</b> <span class="muted" id="cvTabInfo"></span><textarea id="cvTab" class="sheetedit" spellcheck="false" dir="ltr"></textarea></label>
+      <label><b>Chords</b> <span class="muted" id="cvChInfo"></span><textarea id="cvCh" class="sheetedit" spellcheck="false" dir="ltr"></textarea></label>
+      <div class="row" style="justify-content:space-between;margin-top:8px"><span class="help">Saved as a <b>draft</b> inside this version. Converting again replaces the draft.</span><button class="btn primary" id="cvSave">Save draft</button></div>
+    </div>`);
+  const dlg=$("#dlg"), onClose=()=>{ cancelled=true; dlg.removeEventListener("close", onClose); };
+  dlg.addEventListener("close", onClose);
+  const st=$("#cvSt"), list=$("#cvList");
+  const tabParts=[], chParts=[]; let nNotes=0, nBad=0, nChords=0;
+  for(let i=0;i<shots.length;i++){
+    if(cancelled||!list.isConnected) return;
+    const sh=shots[i], head=sh.t!=null?"["+fmtT(sh.t)+"]":(shots.length>1?"[Screenshot "+(i+1)+"]":"");
+    st.textContent=`Reading screenshot ${i+1} of ${shots.length}…`;
+    const fig=document.createElement("figure"); fig.className="cvshot";
+    fig.innerHTML=`<canvas></canvas><figcaption>${esc(head||"Screenshot")}: <span>reading…</span></figcaption>`;
+    list.appendChild(fig);
+    try{
+      let url=_assetImg.get(sh.assetId); if(!url){ url=await S.assets.get(sh.assetId); if(url) _assetImg.set(sh.assetId,url); }
+      if(!url) throw new Error("file not found");
+      const res=await SongbookConvert.convertImage(url, {isChord, tuning: song.tuning,
+        onProgress:(a,b)=>{ st.textContent=`Reading screenshot ${i+1} of ${shots.length}: number ${a} of ${b}`; }});
+      if(cancelled||!list.isConnected) return;
+      SongbookConvert.drawOverlay(fig.querySelector("canvas"), await SongbookConvert.loadImage(url), res);
+      const notes=res.tabs.reduce((s,t)=>s+t.groups.filter(g=>/\d/.test(g.text||"")).length,0);
+      const bad=res.tabs.reduce((s,t)=>s+t.groups.filter(g=>!/\d/.test(g.text||"")).length,0);
+      const chs=res.chords.flat();
+      nNotes+=notes; nBad+=bad; nChords+=chs.length;
+      fig.querySelector("span").textContent = [res.tabs.length?`tab, ${notes} numbers${bad?`, ${bad} unreadable`:""}`:"", chs.length?`chords ${chs.join(" ")}`:"", !res.tabs.length&&!chs.length?"nothing found":""].filter(Boolean).join(" · ");
+      if(res.tabs.length) tabParts.push((head?head+"\n":"")+res.tabs.map(t=>t.text).join("\n\n"));
+      if(chs.length) chParts.push((head?head+"\n":"")+res.chords.map(l=>l.join("   ")).join("\n"));
+    }catch(err){
+      fig.querySelector("span").textContent="couldn't read: "+(err.message||err);
+    }
+  }
+  if(cancelled||!list.isConnected) return;
+  st.textContent = tabParts.length||chParts.length ? "Done. Check the result against the screenshots." : "Didn't find a tab or chord names in these screenshots. They stay as this version's tab.";
+  $("#cvOut").hidden=false;
+  $("#cvTab").value=tabParts.join("\n\n"); $("#cvCh").value=chParts.join("\n\n");
+  $("#cvTabInfo").textContent=tabParts.length?`${nNotes} numbers${nBad?` · ${nBad} unreadable (grey boxes): add them by hand`:""}`:"none found";
+  $("#cvChInfo").textContent=chParts.length?`${nChords} chord names`:"none found";
+  $("#cvSave").onclick=async()=>{
+    const tab=$("#cvTab").value.replace(/\s+$/,""), ch=$("#cvCh").value.replace(/\s+$/,"");
+    if(!tab.trim() && !ch.trim()){ toast("Nothing to save"); return; }
+    try{ await saveConverted(song, key, shots.map(x=>x.assetId), tab, ch); closeDlg(); route(); toast("Draft saved in this version"); }
+    catch(e){ toast("Couldn't save: "+(e.message||e)); }
+  };
+}
+async function saveConverted(song, key, fromShots, tab, ch){
+  migrate(song);
+  const capo=+song.capo||0, now=new Date().toISOString();
+  const put=(kind, text, extra)=>{
+    const old=song.sheets.find(x=>x.auto && x.kind===kind && (extra.sourceId ? x.sourceId===extra.sourceId : x.fromKey===key));
+    const sh=Object.assign(old||{id:uid(), capo}, {kind, label:"From screenshots", text, auto:true, fromShots, convertedAt:now}, extra);
+    if(!old) song.sheets=song.sheets.concat([sh]);
+  };
+  if(key.startsWith("src:")){
+    const sid=key.slice(4);
+    if(tab.trim()) put("tab", tab, {sourceId:sid});
+    if(ch.trim()) put("chords", ch, {sourceId:sid});
+  } else if(key.startsWith("sheet:")){
+    // photo-only version: the tab goes into that version itself; chord names become a sibling draft
+    const own=song.sheets.find(x=>x.id===key.slice(6));
+    if(own && tab.trim()){ own.text=tab; own.kind="tab"; own.auto=true; own.fromShots=fromShots; own.convertedAt=now; }
+    if(ch.trim()) put("chords", ch, {fromKey:key});
+  }
+  await saveSong(song);
 }
 function openSheetDialog(song, sheet){
   const sheets = getSheets(song);
