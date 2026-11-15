@@ -252,6 +252,7 @@ button.mark:hover{background:var(--accent-soft)}
     <a href="#library" data-nav="library">Songs</a>
     <a href="#chords" data-nav="chords">Chords</a>
     <a href="#pending" data-nav="pending">To approve<span class="badge" id="pendBadge" hidden>0</span></a>
+    <a href="#" id="exportBtn" title="Download a JSON backup of all data">Export data</a>
   </nav>
 </div></header>
 
@@ -1569,7 +1570,7 @@ window.addEventListener("message", async e=>{
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, doc, setDoc, getDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 const OWNER = "maayaningber@gmail.com";
 const app = initializeApp({
   "apiKey": "AIzaSyCvemrso6CIlHUepM356UdzjAlrn8Ihq3Y",
@@ -1585,7 +1586,30 @@ document.getElementById("gateBtn").onclick = async () => { try{ await signInWith
 
 window.__db = {
   doc(path){ const r = doc(fs, path); return { set: o => setDoc(r, o), delete: () => deleteDoc(r) }; },
-  collection(n){ return { onSnapshot: (ok, err) => onSnapshot(collection(fs, n), { includeMetadataChanges: true }, ok, err) }; }
+  collection(n){ return { onSnapshot: (ok, err) => onSnapshot(collection(fs, n), { includeMetadataChanges: true }, ok, err) }; },
+  async getAll(n){ const s = await getDocs(collection(fs, n)); return s.docs.map(d => ({ id: d.id, ...d.data() })); }
+};
+
+// ===== Export data: JSON backup of every collection (images included only if asked) =====
+document.getElementById("exportBtn").onclick = async e => {
+  e.preventDefault();
+  const withImages = confirm("Include the screenshots' image data in the backup?\nOK = yes (bigger file). Cancel = list of images only, no pixels.");
+  toast("Preparing backup…");
+  try{
+    const out = { exportedAt: new Date().toISOString(), version: 1, withImages };
+    for(const n of ["songs","pending","ugv","assets"]){
+      let rows = await window.__db.getAll(n);
+      if(n === "assets" && !withImages) rows = rows.map(({data, ...r}) => r);
+      out[n] = rows;
+    }
+    const blob = new Blob([JSON.stringify(out)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "songbook-backup-" + new Date().toISOString().slice(0,16).replace(/[:T]/g,"-") + ".json";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast("Backup saved: " + out.songs.length + " songs, " + out.pending.length + " pending, " + out.ugv.length + " ugv");
+  }catch(err){ toast("Export failed: " + (err.code || err.message)); }
 };
 
 function loadImg(src){ return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
