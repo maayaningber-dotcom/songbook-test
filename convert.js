@@ -243,7 +243,7 @@ function groupCanvas(G, g){
 // shape test for "0": exactly one enclosed hole, sitting in the middle, glyph taller than wide
 function looksLikeZero(g, G){
   const w = G.w, gw = g.x1 - g.x0 + 1, gh = g.y1 - g.y0 + 1;
-  if(gw < 4 || gw / gh < 0.5 || gw / gh > 1.05) return false;
+  if(gw < 4 || gw / gh < 0.5 || gw / gh > 1.3) return false;
   const own = new Set(); for(const part of g.parts) for(const p of part.px) own.add(p);
   const W = gw + 2, H = gh + 2, bg = new Uint8Array(W * H).fill(1);
   for(const p of own){ const px = p % w, py = (p - px) / w; bg[(py - g.y0 + 1) * W + (px - g.x0 + 1)] = 0; }
@@ -264,7 +264,7 @@ function looksLikeZero(g, G){
   }
   if(holes !== 1) return false;
   const mid = ((hy0 + hy1) / 2 - 1) / gh, hh = (hy1 - hy0 + 1) / gh;
-  return mid > 0.38 && mid < 0.62 && hh > 0.4;
+  return mid > 0.35 && mid < 0.65 && hh > 0.4;
 }
 
 let _lastWords = [];
