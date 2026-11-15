@@ -296,7 +296,7 @@ async function readGroups(A, G, onProgress){
   const sp = A.staff.sp, drop = new Set(), byX = A.groups.slice().sort((a, b) => a.x0 - b.x0);
   for(const g of byX){
     if(drop.has(g) || g.text !== "1") continue;
-    const n = byX.find(h => h !== g && !drop.has(h) && h.s === g.s && h.x0 >= g.x1 - 1 && h.x0 - g.x1 <= sp * 0.3 && /^\d$/.test(h.text || ""));
+    const n = byX.find(h => h !== g && !drop.has(h) && h.s === g.s && h.x0 >= g.x1 - 1 && h.x0 - g.x1 <= sp * 0.42 && /^\d$/.test(h.text || ""));
     if(!n) continue;
     g.text = "1" + n.text; g.x1 = Math.max(g.x1, n.x1); g.y0 = Math.min(g.y0, n.y0); g.y1 = Math.max(g.y1, n.y1);
     g.parts = g.parts.concat(n.parts); g.cx = (g.x0 + g.x1) / 2; drop.add(n);
