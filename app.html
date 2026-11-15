@@ -1029,7 +1029,75 @@ function videoPanelHTML(song, src, n, flats){
     ${shotsHTML(src.shots, key)}
     ${mine.map(sh=>`<h3 class="vh">${sheetName(sheets, sh)}${sh.auto?` <span class="badge" style="position:static">draft</span>`:""} <button class="btn small ghost" data-editsheet="${esc(sh.id)}">Edit</button></h3>${fullSheetHTML(sh.text, song.lang==="he"&&sh.kind!=="tab", n+((+sh.capo||0)-(+song.capo||0)), flats, sh.kind)}`).join("")}
     ${convertBtnHTML(src.shots, key)}
+    ${listenBtnHTML(src)}
   </section>`;
+}
+// ================= chords from audio (extension 1.3.0, listen.js) =================
+// LS: the one listening session (only the dock's Instagram video can be listened to)
+const LS = {srcId:null, on:false, live:"", liveT:0, msg:"", timer:null};
+function listenBtnHTML(src){
+  if(src.kind!=="instagram" || !igPath(src.url)) return "";
+  const on = LS.on && LS.srcId===src.id;
+  const st = LS.srcId===src.id ? (on && LS.live ? `Hearing <b>${esc(LS.live)}</b> at ${fmtT(LS.liveT)}` : esc(LS.msg)) : "Plays the video and guesses the chords from its sound, on your computer. Nothing is saved until you check the draft.";
+  return `<div class="row" style="margin-top:12px;gap:8px;align-items:center"><button class="btn small ${on?"":"primary"}" data-listen="${esc(src.id)}">${on?"⏹ Stop listening":"🎧 Listen for chords"}</button><span class="muted" id="lsSt" style="font-size:12px">${st}</span></div>`;
+}
+function lsStatus(){ const song=S.songs.get(S.songId), src=song&&(song.sources||[]).find(x=>x.id===LS.srcId); const el=document.getElementById("lsSt"); if(!el||!src) return;
+  const b=document.querySelector(`[data-listen="${CSS.escape(src.id)}"]`), wrap=document.createElement("div"); wrap.innerHTML=listenBtnHTML(src);
+  if(b) b.parentElement.replaceWith(wrap.firstElementChild); }
+function listenToggle(srcId){
+  const song=S.songs.get(S.songId); if(!song) return;
+  if(LS.on && LS.srcId===srcId){ dockSend({type:"songbook-listen", on:false}); LS.live=""; LS.msg="Stopping…"; lsStatus(); return; }
+  if(LS.on) dockSend({type:"songbook-listen", on:false});
+  LS.srcId=srcId; LS.on=false; LS.live=""; LS.msg="Starting…";
+  const go=()=>{
+    dockSend({type:"songbook-listen", on:true}); dockSend({type:"songbook-play"});
+    clearTimeout(LS.timer);
+    LS.timer=setTimeout(()=>{ if(!LS.on && LS.srcId===srcId){ LS.msg="No answer from the extension. Load version 1.3.0 in chrome://extensions and reload this page."; lsStatus(); } },4000);
+  };
+  if(DK.songId!==song.id || DK.srcId!==srcId){ dockOpen(song, srcId); LS.msg="Opening the video…"; lsStatus();
+    const t0=Date.now(), w=setInterval(()=>{ if(DK.ready&&DK.srcId===srcId){ clearInterval(w); go(); } else if(Date.now()-t0>9000){ clearInterval(w); LS.msg="The extension wasn't detected in the player."; lsStatus(); } },300);
+  } else if(DK.ready) go();
+  else { LS.msg="The extension wasn't detected in the player."; }
+  lsStatus();
+}
+function listenMessage(d){
+  if(d.type==="songbook-listening"){
+    clearTimeout(LS.timer);
+    LS.on=!!d.on;
+    LS.msg = d.ok===false ? "Couldn't listen: "+(d.error||"unknown") : d.needClick ? "Click the video once (the browser needs a click before it plays sound to the analyser)." : (d.on ? "Listening… play the part you want." : "");
+    lsStatus();
+  } else if(d.type==="songbook-chord-live"){
+    LS.live=d.chord||""; LS.liveT=+d.t||0; if(d.paused) LS.msg="Paused"; lsStatus();
+  } else if(d.type==="songbook-chords"){
+    LS.on=false; LS.live=""; lsStatus();
+    openHeardDialog(LS.srcId, d.segments||[]);
+  }
+}
+// segments -> draft text: one line per ~4 chords, each line starting with the time of its first chord
+function heardText(segs){
+  const s=segs.filter(x=>x && x.chord && x.t1-x.t0>=0.6).sort((a,b)=>a.t0-b.t0), out=[];
+  const merged=[]; for(const x of s){ const p=merged[merged.length-1]; if(p && p.chord===x.chord && x.t0-p.t1<1) p.t1=Math.max(p.t1,x.t1); else merged.push(Object.assign({},x)); }
+  for(let i=0;i<merged.length;i+=4){ const g=merged.slice(i,i+4); out.push("["+fmtT(g[0].t0)+"] "+g.map(x=>x.chord).join("   ")); }
+  return {text:out.join("\n"), n:merged.length};
+}
+function openHeardDialog(srcId, segs){
+  const song=S.songs.get(S.songId); if(!song) return;
+  const {text, n}=heardText(segs);
+  if(!n){ LS.msg="No chords heard. Play a strummed part for a few seconds, then stop."; lsStatus(); return; }
+  openDlg("Chords heard", `
+    <p class="help">Guessed from the video's sound on this computer: ${n} chord change${n>1?"s":""}. Works best on strummed chords; check them by ear and fix anything wrong, then save. Saved as a <b>draft</b> in this version; listening again replaces it.</p>
+    <textarea id="hdTxt" class="sheetedit" spellcheck="false" dir="ltr" style="width:100%;min-height:240px">${esc(text)}</textarea>
+    <div class="row" style="justify-content:flex-end;margin-top:8px"><button class="btn primary" id="hdSave">Save draft</button></div>`);
+  $("#hdSave").onclick=async()=>{
+    const txt=$("#hdTxt").value.replace(/\s+$/,""); if(!txt.trim()){ toast("Nothing to save"); return; }
+    try{
+      migrate(song);
+      const old=song.sheets.find(x=>x.auto && x.kind==="chords" && x.sourceId===srcId && x.heard);
+      const sh=Object.assign(old||{id:uid(), capo:+song.capo||0}, {kind:"chords", label:"Chords heard", text:txt, auto:true, heard:true, sourceId:srcId, heardAt:new Date().toISOString()});
+      if(!old) song.sheets=song.sheets.concat([sh]);
+      await saveSong(song); closeDlg(); LS.msg=""; route(); toast("Draft saved in this version");
+    }catch(e){ toast("Couldn't save: "+(e.message||e)); }
+  };
 }
 // ================= convert screenshots -> tab / chords (local OCR, convert.js) =================
 function convertBtnHTML(shots, key){
@@ -1096,7 +1164,7 @@ async function saveConverted(song, key, fromShots, tab, ch){
   migrate(song);
   const capo=+song.capo||0, now=new Date().toISOString();
   const put=(kind, text, extra)=>{
-    const old=song.sheets.find(x=>x.auto && x.kind===kind && (extra.sourceId ? x.sourceId===extra.sourceId : x.fromKey===key));
+    const old=song.sheets.find(x=>x.auto && !x.heard && x.kind===kind && (extra.sourceId ? x.sourceId===extra.sourceId : x.fromKey===key));
     const sh=Object.assign(old||{id:uid(), capo}, {kind, label:"From screenshots", text, auto:true, fromShots, convertedAt:now}, extra);
     if(!old) song.sheets=song.sheets.concat([sh]);
   };
@@ -1738,6 +1806,7 @@ const IG_ORIGIN = /^https:\/\/(www\.)?instagram\.com$/;
 function dockEl(){ return document.getElementById("dock"); }
 function dockSend(msg){ const f=document.getElementById("igFrame"); if(f&&f.contentWindow) f.contentWindow.postMessage(msg,"*"); }
 function dockTeardown(){
+  if(LS.on){ dockSend({type:"songbook-listen", on:false}); LS.on=false; LS.live=""; LS.msg="Stopped (the video was closed)."; }
   clearInterval(DK.pingT); clearInterval(DK.loopT); clearTimeout(DK.warnT);
   if(DK.yt && DK.yt.destroy){ try{ DK.yt.destroy(); }catch(e){} }
   DK.yt=null; DK.ytReady=false; DK.ready=false; DK.songId=null; DK.srcId=null; DK.kind=null; DK.a=DK.b=null; DK.pend=null;
@@ -1829,6 +1898,8 @@ function dockSeek(srcId, t, href){
 document.addEventListener("click", e=>{
   const pl=e.target.closest("[data-play]");
   if(pl){ const song=S.songs.get(S.songId); if(song){ S.srcVer=pl.dataset.play; S.sheetId=null; dockOpen(song, pl.dataset.play); route(); } return; }
+  const ls=e.target.closest("[data-listen]");
+  if(ls){ listenToggle(ls.dataset.listen); return; }
   const sk=e.target.closest("[data-seek]");
   if(sk){ e.preventDefault(); dockSeek(sk.dataset.src||DK.srcId, +sk.dataset.seek, sk.getAttribute("href")); }
 });
@@ -1854,6 +1925,8 @@ window.addEventListener("message", async e=>{
       else { song.shots=song.shots||[]; song.shots.push(Object.assign({srcCode:d.code||""}, entry)); await saveSong(song); toast("Frame saved to “"+song.title+"”"); }
       route();
     }catch(err){ toast("Couldn't save the frame"); }
+  } else if(d.type==="songbook-listening" || d.type==="songbook-chord-live" || d.type==="songbook-chords"){
+    listenMessage(d);
   } else if(d.type==="songbook-capture-failed"){
     toast("Capture blocked: "+(d.error||"unknown"));
   }
