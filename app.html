@@ -170,6 +170,7 @@ main{padding:22px 0 80px}
 a.mark:hover{background:var(--accent-soft)}
 
 textarea.tabs{width:100%;min-height:180px;font-family:var(--font-mono);font-size:13px;line-height:1.35;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);direction:ltr;white-space:pre;overflow:auto;resize:vertical}
+.vh{display:flex;align-items:center;gap:8px;font-size:15px;margin:16px 0 8px}
 .shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
 .shot{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--bg)}
 .shot img,.shot video{width:100%;display:block;cursor:zoom-in}
@@ -252,6 +253,7 @@ button.mark:hover{background:var(--accent-soft)}
     <a href="#library" data-nav="library">Songs</a>
     <a href="#chords" data-nav="chords">Chords</a>
     <a href="#pending" data-nav="pending">To approve<span class="badge" id="pendBadge" hidden>0</span></a>
+    <a href="#" id="migrateBtn" title="One-time: move screenshots to their video versions">Move shots</a>
     <a href="#" id="exportBtn" title="Download a JSON backup of all data">Export data</a>
   </nav>
 </div></header>
@@ -774,7 +776,7 @@ function strum(frets){
 // ================= library =================
 let libQuery="", libStatus="all";
 const CONTENT = {both:"Chords + tabs", chords:"Chords", tabs:"Tabs", none:"Nothing yet"};
-function contentOf(song){ const sh=getSheets(song); const c=sh.some(x=>x.kind!=="tab"), t=sh.some(x=>x.kind==="tab"); return c&&t?"both":c?"chords":t?"tabs":"none"; }
+function contentOf(song){ const sh=getSheets(song).filter(x=>(x.text||"").trim()); const c=sh.some(x=>x.kind!=="tab"), t=sh.some(x=>x.kind==="tab"); return c&&t?"both":c?"chords":t?"tabs":"none"; }
 function renderLibrary(v){
   const songs=[...S.songs.values()];
   const q=libQuery.trim().toLowerCase();
@@ -898,10 +900,11 @@ function renderSong(v, id){
         <h2>Chords in this song <span class="muted" style="font-size:13px;font-family:var(--font-body);font-weight:400">tap for every way to play it</span></h2>
         ${chords.length ? `<div class="strip">${chords.map(c=>{ const tc=tChord(c,n+(_cur&&chordsOfText(_cur.text).length?((+_cur.capo||0)-(+song.capo||0)):0),flats); const vv=generateVoicings(tc)[0]; return `<button class="mini" data-chord="${esc(tc)}">${vv?diagram(vv,{w:70,gy:12,fingers:false}):""}<b>${esc(tc)}</b></button>`; }).join("")}</div>` : `<p class="empty-sheet">No chords yet.</p>`}
       </section>
-      <section class="panel">
-        <h2>Screenshots ${S.assets?`<label class="btn small" style="cursor:pointer">+ Upload<input type="file" id="up" accept="image/*" multiple hidden></label>`:""}</h2>
-        ${shotsHTML(song)}
-      </section>
+      ${(song.shots||[]).length?`<section class="panel">
+        <h2>Screenshots not in a version yet</h2>
+        <p class="muted" style="margin:0 0 8px">These ${song.shots.length} screenshot${song.shots.length>1?"s":""} sit on the song itself. <a href="#" id="goMigrate">Move them to their versions</a>.</p>
+        ${shotsHTML(song.shots, "song")}
+      </section>`:""}
     </div>
     <aside>
       <section class="panel">
@@ -952,37 +955,60 @@ function renderSong(v, id){
     let t=null;
     el.addEventListener("input", ()=>{ st.textContent="Editing…"; clearTimeout(t); t=setTimeout(async()=>{ apply(el.value); await saveSong(song); st.textContent=S.db?"Saved":"Not saved: storage isn't available in this view"; }, 900); });
   }
-  const up=$("#up"); if(up) up.onchange = e => uploadFiles(song, [...e.target.files]);
+  v.querySelectorAll("[data-srcver]").forEach(b=>b.onclick=()=>{ S.srcVer=b.dataset.srcver; S.sheetId=null; if(DK.songId!==song.id||DK.srcId!==S.srcVer) dockOpen(song, S.srcVer); route(); });
+  const addShotsV=$("#addShotsVer"); if(addShotsV) addShotsV.onclick=async()=>{ migrate(song); const sh={id:uid(), kind:"tab", label:"Screenshots", text:"", capo:+song.capo||0, shots:[]}; song.sheets=song.sheets.concat([sh]); S.sheetId=sh.id; await saveSong(song); route(); };
+  v.querySelectorAll("[data-editsheet]").forEach(b=>b.onclick=()=>openSheetDialog(song, getSheets(song).find(x=>x.id===b.dataset.editsheet)));
+  const gm=$("#goMigrate"); if(gm) gm.onclick=e=>{ e.preventDefault(); openMigrateDialog(); };
+  v.querySelectorAll("input[data-up]").forEach(inp=>inp.onchange = e => uploadFiles(song, [...e.target.files], inp.dataset.up));
   v.querySelectorAll("[data-shot-del]").forEach(b=>b.onclick=async()=>{
     if(!b.dataset.c){ b.dataset.c=1; b.textContent="Sure?"; return; }
-    const id=b.dataset.shotDel; song.shots=(song.shots||[]).filter(s=>s.assetId!==id); await saveSong(song);
-    try{ await S.assets.delete(id); }catch(e){} route();
+    await removeShot(song, b.dataset.key, b.dataset.shotDel); route();
   });
-  v.querySelectorAll("[data-shot-cap]").forEach(inp=>inp.onchange=()=>{ const sh=(song.shots||[]).find(s=>s.assetId===inp.dataset.shotCap); if(sh){ sh.caption=inp.value; saveSong(song);} });
+  v.querySelectorAll("[data-shot-cap]").forEach(inp=>inp.onchange=()=>setShotCaption(song, inp.dataset.key, inp.dataset.shotCap, inp.value));
   v.querySelectorAll(".shot img").forEach(img=>img.onclick=()=>openDlg(img.alt||"Image", `<img src="${img.src}" alt="" style="width:100%">`));
 }
 function sheetTabsHTML(song, n, flats, heb){
   const sheets = getSheets(song);
   const ug = `https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(song.title+" "+(song.artist||""))}`;
   const t4u = `https://www.tab4u.com/resultsSimple?tab=songs&q=${encodeURIComponent(song.title)}`;
-  if(!sheets.length) return `<section class="panel" style="margin-bottom:16px"><h2>Chords &amp; tabs</h2>
+  const vs = videoVersions(song), selV = selVideo(song), owned = new Set(vs.map(x=>x.id));
+  if(!sheets.length && !vs.length) return `<section class="panel" style="margin-bottom:16px"><h2>Chords &amp; tabs</h2>
     <p class="empty-sheet" style="margin-top:0">No versions yet. Open the song on a chords site, select the whole page (Ctrl+A), copy it, and press <b>Add version</b>. Site menus and comments are removed for you.</p>
     <div class="row"><a class="btn small" href="${ug}" target="_blank" rel="noopener">Find on Ultimate Guitar</a>${heb?`<a class="btn small" href="${t4u}" target="_blank" rel="noopener">Find on Tab4u</a>`:""}<button class="btn small primary" id="addSheet">+ Add version</button></div></section>`;
   // order: chords first, then tabs
-  const ordered = sheets.filter(x=>x.kind!=="tab").concat(sheets.filter(x=>x.kind==="tab"));
+  const texts = sheets.filter(x=>!owned.has(x.sourceId));
+  const ordered = texts.filter(x=>x.kind!=="tab").concat(texts.filter(x=>x.kind==="tab"));
+  const vtabs = vs.map((x,i)=>`<button class="st" role="tab" data-srcver="${esc(x.id)}" aria-selected="${x===selV}">▶ ${esc(verLabel(x,i))}${(x.shots||[]).length?`<small>${x.shots.length} 📷</small>`:""}</button>`).join("");
+  const addBtns = `<button class="btn small add" id="addSheet2">+ Add version</button><button class="btn small add" id="addShotsVer" title="A version made only of screenshots, with no video">+ Screenshots</button>`;
+  if(selV) return `<div class="sheettabs" role="tablist" aria-label="Versions">${vtabs}${ordered.map(sh=>`<button class="st" role="tab" data-sheet="${esc(sh.id)}" aria-selected="false">${sheetName(sheets, sh)}${sh.label?`<small dir="auto">${esc(sh.label)}</small>`:""}</button>`).join("")}${addBtns}</div>${videoPanelHTML(song, selV, n, flats)}`;
+  if(!ordered.length) return `<div class="sheettabs" role="tablist" aria-label="Versions">${vtabs}${addBtns}</div>`;
   const cur = ordered.find(x=>x.id===S.sheetId) || ordered[0];
   const rtl = cur.kind!=="tab" && (song.lang==="he" || hasHeb(cur.text));
   const nn = n + ((+cur.capo||0) - (+song.capo||0));
   const info = [cur.source, cur.kind!=="tab" ? ("written for "+((+cur.capo||0)?("capo "+cur.capo):"no capo")) : "", cur.tuning&&!/^E\s*A\s*D\s*G\s*B\s*E$/i.test(cur.tuning)?("tuning "+cur.tuning):""].filter(Boolean).join(" · ");
   return `<div class="sheettabs" role="tablist" aria-label="Versions">
-      ${ordered.map(sh=>`<button class="st" role="tab" data-sheet="${esc(sh.id)}" aria-selected="${sh===cur}">${sheetName(sheets, sh)}${sh.label?`<small dir="auto">${esc(sh.label)}</small>`:""}</button>`).join("")}
-      <button class="btn small add" id="addSheet2">+ Add version</button>
+      ${vtabs}${ordered.map(sh=>`<button class="st" role="tab" data-sheet="${esc(sh.id)}" aria-selected="${sh===cur}">${sheetName(sheets, sh)}${sh.label?`<small dir="auto">${esc(sh.label)}</small>`:""}</button>`).join("")}
+      ${addBtns}
     </div>
     <section class="panel sheetpanel" role="tabpanel">
       <div class="sheetbar"><span class="muted" style="font-size:12px">${esc(info)}${cur.url?` · <a href="${esc(cur.url)}" target="_blank" rel="noopener">original</a>`:""}</span>
         <span class="row" style="gap:6px"><a class="btn small" href="${ug}" target="_blank" rel="noopener">Find on UG</a>${heb?`<a class="btn small" href="${t4u}" target="_blank" rel="noopener">Find on Tab4u</a>`:""}<button class="btn small" id="editCurSheet" data-id="${esc(cur.id)}">Edit</button></span></div>
-      ${fullSheetHTML(cur.text, rtl, nn, flats, cur.kind)}
+      ${(cur.text||"").trim()?fullSheetHTML(cur.text, rtl, nn, flats, cur.kind):""}
+      ${(cur.shots&&(cur.shots.length||!(cur.text||"").trim()))?`<h3 class="vh">Screenshots ${uploadBtn("sheet:"+cur.id)}</h3>${shotsHTML(cur.shots,"sheet:"+cur.id)}`:""}
     </section>`;
+}
+function videoPanelHTML(song, src, n, flats){
+  const sheets = getSheets(song), mine = sheets.filter(x=>x.sourceId===src.id), key = "src:"+src.id;
+  const info = [src.by, KINDS[src.kind], src.note].filter(Boolean).join(" · ");
+  const shared = linkedSrcs(song, src).length>1;
+  return `<section class="panel sheetpanel" role="tabpanel">
+    <div class="sheetbar"><span class="muted" style="font-size:12px" dir="auto">${esc(info)}${shared?" · shared with another song":""} · <a href="${esc(src.url)}" target="_blank" rel="noopener">original</a></span>
+      <span class="row" style="gap:6px"><button class="btn small" data-play="${esc(src.id)}">▶ Play</button><button class="btn small ghost" data-editsrc="${esc(src.id)}">Edit video</button></span></div>
+    <h3 class="vh">Screenshots ${uploadBtn(key)}</h3>
+    ${shotsHTML(src.shots, key)}
+    ${mine.map(sh=>`<h3 class="vh">${sheetName(sheets, sh)}${sh.auto?` <span class="badge" style="position:static">draft</span>`:""} <button class="btn small ghost" data-editsheet="${esc(sh.id)}">Edit</button></h3>${fullSheetHTML(sh.text, song.lang==="he"&&sh.kind!=="tab", n+((+sh.capo||0)-(+song.capo||0)), flats, sh.kind)}`).join("")}
+    ${(src.shots||[]).length?`<p class="muted" style="margin:12px 0 0;font-size:13px">Convert screenshots to chords/tab: coming in a later phase. Until then the screenshots above are this version's tab.</p>`:""}
+  </section>`;
 }
 function openSheetDialog(song, sheet){
   const sheets = getSheets(song);
@@ -1090,23 +1116,112 @@ function srcHTML(src){
     <div><button class="btn small ghost" data-editsrc="${esc(src.id)}">Edit</button></div>
   </div>`;
 }
-function shotsHTML(song){
-  const shots = song.shots||[];
-  if(!shots.length) return `<p class="muted" style="margin:0">Press 📷 in the video player at a “Tab on screen” moment and the frame is saved here, or upload an image.</p>`;
+// ---- versions: a "holder" owns screenshots. key = "src:<sourceId>" (video version) | "sheet:<sheetId>" (text version) | "song" (legacy, not yet migrated)
+function codeOf(src){
+  if(src.kind==="instagram"){ const p=igPath(src.url); return p?"ig:"+p.code:null; }
+  if(src.kind==="youtube"){ const i=ytId(src.url); return i?"yt:"+i:null; }
+  return null;
+}
+function videoVersions(song){ return (song.sources||[]).filter(x=>codeOf(x)); }
+function verLabel(src, i){ const p=src.kind==="instagram"?igPath(src.url):null; return src.by || (p?p.code:"") || src.title || ("Video "+(i+1)); }
+function selVideo(song){
+  const vs=videoVersions(song); if(!vs.length) return null;
+  if(S.sheetId && getSheets(song).some(x=>x.id===S.sheetId)) return null;
+  return vs.find(x=>x.id===S.srcVer) || vs[0];
+}
+// the same video in other songs is ONE shared version: its screenshots are mirrored there
+function linkedSrcs(song, src){
+  const out=[{song, h:src}], c=codeOf(src); if(!c) return out;
+  for(const s of S.songs.values()){ if(s.id===song.id) continue; for(const x of (s.sources||[])) if(codeOf(x)===c) out.push({song:s, h:x}); }
+  return out;
+}
+function holderOf(song, key){
+  if(key.startsWith("src:")) return (song.sources||[]).find(x=>x.id===key.slice(4));
+  if(key.startsWith("sheet:")) return getSheets(song).find(x=>x.id===key.slice(6));
+  return song;
+}
+function holdersFor(song, key){ const h=holderOf(song,key); if(!h) return []; return key.startsWith("src:") ? linkedSrcs(song,h) : [{song, h}]; }
+async function addShotsTo(song, key, entries){
+  for(const {song:s, h} of holdersFor(song,key)){
+    h.shots=h.shots||[]; let ch=false;
+    for(const e of entries){ if(h.shots.some(a=>a.assetId===e.assetId)) continue; h.shots.push(Object.assign({}, e)); ch=true; }
+    if(ch) await saveSong(s);
+  }
+}
+const addShotTo = (song, key, entry) => addShotsTo(song, key, [entry]);
+
+// ---- one-time move of song-level screenshots to their versions (preview + confirm)
+function planMigration(){
+  const plan=[];
+  for(const song of S.songs.values()){
+    const shots=song.shots||[]; if(!shots.length) continue;
+    const toSrc=new Map(), rest=[];
+    for(const sh of shots){
+      const src = sh.srcCode && (song.sources||[]).find(x=>codeOf(x)==="ig:"+sh.srcCode);
+      if(src){ if(!toSrc.has(src.id)) toSrc.set(src.id,[]); toSrc.get(src.id).push(sh); } else rest.push(sh);
+    }
+    plan.push({song, toSrc, rest});
+  }
+  return plan;
+}
+function openMigrateDialog(){
+  const plan=planMigration();
+  if(!plan.length){ openDlg("Move screenshots to versions", `<p>Nothing to move: no song has screenshots outside a version.</p>`); return; }
+  let nV=0, nT=0;
+  const rows=plan.map(p=>{
+    const lines=[];
+    for(const [sid,list] of p.toSrc){ const vs=videoVersions(p.song), src=vs.find(x=>x.id===sid); nV+=list.length; lines.push(`${list.length} → video “${esc(verLabel(src, vs.indexOf(src)))}”${linkedSrcs(p.song,src).length>1?" (shared with another song)":""}`); }
+    if(p.rest.length){ nT+=p.rest.length; lines.push(`${p.rest.length} → new text version “Screenshots”`); }
+    return `<tr><td dir="auto"><b>${esc(p.song.title)}</b></td><td>${lines.join("<br>")}</td></tr>`;
+  }).join("");
+  openDlg("Move screenshots to versions", `
+    <p class="help">${nV} screenshot${nV===1?"":"s"} go to the video version they were taken from, ${nT} with no matching video go to a new “Screenshots” version. Nothing is deleted. <b>Press Export data first</b> if you haven't today.</p>
+    <div style="max-height:50vh;overflow:auto"><table style="width:100%;font-size:14px"><tbody>${rows}</tbody></table></div>
+    <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn primary" id="migGo">Move ${nV+nT} screenshots</button></div>`);
+  $("#migGo").onclick=async()=>{
+    $("#migGo").disabled=true; $("#migGo").textContent="Moving…";
+    try{
+      for(const p of plan){
+        const song=p.song;
+        for(const [sid,list] of p.toSrc) await addShotsTo(song, "src:"+sid, list.map(({srcCode,...e})=>e));
+        if(p.rest.length){
+          migrate(song);
+          let sh=song.sheets.find(x=>x.label==="Screenshots" && !(x.text||"").trim());
+          if(!sh){ sh={id:uid(), kind:"tab", label:"Screenshots", text:"", capo:+song.capo||0, shots:[]}; song.sheets=song.sheets.concat([sh]); }
+          sh.shots=sh.shots||[];
+          for(const e of p.rest.map(({srcCode,...r})=>r)) if(!sh.shots.some(a=>a.assetId===e.assetId)) sh.shots.push(e);
+        }
+        song.shots=[]; await saveSong(song);
+      }
+      closeDlg(); toast("Moved "+(nV+nT)+" screenshots"); route();
+    }catch(err){ toast("Migration stopped: "+(err.message||err)); }
+  };
+}
+document.getElementById("migrateBtn").onclick=e=>{ e.preventDefault(); openMigrateDialog(); };
+async function removeShot(song, key, assetId){
+  for(const {song:s, h} of holdersFor(song,key)){ h.shots=(h.shots||[]).filter(a=>a.assetId!==assetId); await saveSong(s); }
+  try{ await S.assets.delete(assetId); }catch(e){}
+}
+function setShotCaption(song, key, assetId, val){
+  for(const {song:s, h} of holdersFor(song,key)){ const sh=(h.shots||[]).find(a=>a.assetId===assetId); if(sh){ sh.caption=val; saveSong(s); } }
+}
+function shotsHTML(shots, key){
+  shots = (shots||[]).slice().sort((a,b)=>(a.t??1e9)-(b.t??1e9));
+  if(!shots.length) return `<p class="muted" style="margin:0">No screenshots yet. Press 📷 in the video player at a “Tab on screen” moment, or upload an image.</p>`;
   return `<div class="shots">${shots.map(sh=>{
     const media = `<img data-asset="${esc(sh.assetId)}" alt="${esc(sh.caption||"Screenshot")}" loading="lazy">`;
-    return `<figure class="shot" style="margin:0">${media}<figcaption class="cap"><input data-shot-cap="${esc(sh.assetId)}" value="${esc(sh.caption||"")}" placeholder="Caption" aria-label="Caption" dir="auto" style="border:0;background:transparent;min-width:0;flex:1;font-size:12px"><button class="btn small ghost" data-shot-del="${esc(sh.assetId)}" aria-label="Delete file">✕</button></figcaption></figure>`; }).join("")}</div>`;
+    return `<figure class="shot" style="margin:0">${media}<figcaption class="cap"><input data-key="${esc(key)}" data-shot-cap="${esc(sh.assetId)}" value="${esc(sh.caption||"")}" placeholder="Caption" aria-label="Caption" dir="auto" style="border:0;background:transparent;min-width:0;flex:1;font-size:12px"><button class="btn small ghost" data-key="${esc(key)}" data-shot-del="${esc(sh.assetId)}" aria-label="Delete file">✕</button></figcaption></figure>`; }).join("")}</div>`;
 }
-async function uploadFiles(song, files){
+function uploadBtn(key){ return S.assets?`<label class="btn small" style="cursor:pointer">+ Upload<input type="file" data-up="${esc(key)}" accept="image/*" multiple hidden></label>`:""; }
+async function uploadFiles(song, files, key){
   if(!S.assets || !files.length) return;
   toast("Uploading "+files.length+" file"+(files.length>1?"s":"")+"…");
-  song.shots = song.shots||[];
   for(const f of files){
     if(!f.type.startsWith("image/")){ toast(f.name+": images only"); continue; }
-    try{ const r = await S.assets.upload(f); song.shots.push({assetId:r.id, type:r.contentType, caption:"", addedAt:new Date().toISOString()}); }
+    try{ const r = await S.assets.upload(f); await addShotTo(song, key, {assetId:r.id, type:r.contentType, caption:"", addedAt:new Date().toISOString()}); }
     catch(e){ toast("Upload failed for "+f.name); }
   }
-  await saveSong(song); route(); toast("Uploaded");
+  route(); toast("Uploaded");
 }
 const _assetImg = new Map();
 function hydrateAssets(root){
@@ -1220,7 +1335,7 @@ function ugSearch(song, kind){ return `https://www.ultimate-guitar.com/search.ph
 function fillQueue(){
   const songs=[...S.songs.values()].sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""));
   const q=[];
-  for(const s of songs){ const sh=getSheets(s), sk=s.skipFill||{};
+  for(const s of songs){ const sh=getSheets(s).filter(x=>(x.text||"").trim()), sk=s.skipFill||{};
     if(!sh.some(x=>x.kind!=="tab") && !sk.chords) q.push({song:s, kind:"chords"});
     if(!sh.some(x=>x.kind==="tab") && !sk.tab) q.push({song:s, kind:"tab"}); }
   return q;
@@ -1462,7 +1577,7 @@ function dockSync(){
   if(DK.songId) dockTeardown();
   if(DK.closed[id]) return;
   const vids=dockVideos(song);
-  if(vids.length) dockOpen(song, vids[0].id);
+  if(vids.length){ const sv=selVideo(song); dockOpen(song, (sv&&vids.some(x=>x.id===sv.id)?sv:vids[0]).id); }
 }
 function dockOpen(song, srcId, pend){
   const src=(song.sources||[]).find(x=>x.id===srcId); if(!src) return;
@@ -1487,7 +1602,7 @@ function dockOpen(song, srcId, pend){
       ${marks.length?`<div class="marks">${marks.map(m=>`<button class="mark ${m.kind==="tab"?"tab":""}" data-seek="${+m.t}" data-src="${esc(src.id)}"><b>${fmtT(m.t)}</b>${esc(m.label||MARK_KIND[m.kind]||"")}</button>`).join("")}</div>`:""}
     </div>`;
   d.classList.add("on");
-  const sel=document.getElementById("dkSel"); if(sel) sel.onchange=()=>dockOpen(song, sel.value);
+  const sel=document.getElementById("dkSel"); if(sel) sel.onchange=()=>{ S.srcVer=sel.value; S.sheetId=null; dockOpen(song, sel.value); route(); };
   document.getElementById("dkMin").onclick=()=>{ DK.min=!DK.min; d.classList.toggle("min",DK.min); document.getElementById("dkMin").textContent=DK.min?"▢":"–"; };
   document.getElementById("dkX").onclick=()=>{ const sid=DK.songId; dockTeardown(); DK.closed[sid]=true; };
   d.querySelectorAll("[data-rate]").forEach(b=>b.onclick=()=>dockRate(+b.dataset.rate));
@@ -1537,7 +1652,7 @@ function dockSeek(srcId, t, href){
 }
 document.addEventListener("click", e=>{
   const pl=e.target.closest("[data-play]");
-  if(pl){ const song=S.songs.get(S.songId); if(song){ dockOpen(song, pl.dataset.play); } return; }
+  if(pl){ const song=S.songs.get(S.songId); if(song){ S.srcVer=pl.dataset.play; S.sheetId=null; dockOpen(song, pl.dataset.play); route(); } return; }
   const sk=e.target.closest("[data-seek]");
   if(sk){ e.preventDefault(); dockSeek(sk.dataset.src||DK.srcId, +sk.dataset.seek, sk.getAttribute("href")); }
 });
@@ -1555,11 +1670,13 @@ window.addEventListener("message", async e=>{
   } else if(d.type==="songbook-captured"){
     if(!d.dataUrl){ toast("Frame arrived without an image"); return; }
     const song=S.songs.get(DK.songId); if(!song||!S.assets) return;
+    const src=(song.sources||[]).find(x=>x.id===DK.srcId);
     try{
       const r=await S.assets.uploadDataUrl(d.dataUrl);
-      song.shots=song.shots||[];
-      song.shots.push({assetId:r.id, type:r.contentType, caption:(d.code?d.code+" ":"")+fmtT(d.t||0), t:+(d.t||0), srcCode:d.code||"", addedAt:new Date().toISOString()});
-      await saveSong(song); toast("Frame saved to “"+song.title+"”"); route();
+      const entry={assetId:r.id, type:r.contentType, caption:(d.code?d.code+" ":"")+fmtT(d.t||0), t:+(d.t||0), addedAt:new Date().toISOString()};
+      if(src){ await addShotTo(song, "src:"+src.id, entry); toast("Frame saved to version “"+verLabel(src, videoVersions(song).indexOf(src))+"”"); }
+      else { song.shots=song.shots||[]; song.shots.push(Object.assign({srcCode:d.code||""}, entry)); await saveSong(song); toast("Frame saved to “"+song.title+"”"); }
+      route();
     }catch(err){ toast("Couldn't save the frame"); }
   } else if(d.type==="songbook-capture-failed"){
     toast("Capture blocked: "+(d.error||"unknown"));
