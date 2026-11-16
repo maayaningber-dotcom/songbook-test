@@ -1153,7 +1153,9 @@ function analyzeVersion(song, srcId, manual){
 }
 function anSend(){
   if(!AN.want || DK.srcId!==AN.want) return;
-  dockSend({type:"songbook-analyze"});
+  let known=[]; // chords already written for this version (from screenshots), in sounding pitch, to nudge the listener
+  try{ const song=S.songs.get(DK.songId); for(const sh of (song&&song.sheets)||[]){ if(sh.heard || sh.sourceId!==DK.srcId || sh.kind==="tab") continue; for(const c of chordsOfText(sh.text||"")){ const t=tChord(c, +sh.capo||0, false); if(!known.includes(t)) known.push(t); } } }catch(_){ known=[]; }
+  dockSend({type:"songbook-analyze", known});
   const id=AN.want; clearTimeout(AN.noExtT);
   AN.noExtT=setTimeout(()=>{ const a=AN.by[id]; if(a && a.state==="wait"){ AN.by[id]={state:"err", msg:"No answer: load extension 1.4.0 in chrome://extensions, then reload this page."}; anUpdate(id); } },6000);
 }
