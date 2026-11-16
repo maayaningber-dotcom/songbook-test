@@ -179,14 +179,14 @@ function analyseStaff(G, m, st){
   const bandOf = y => { let b = 0; while(b < mids.length && y > mids[b]) b++; return b; };
   const splitTall = c => {
     const ch = c.y1 - c.y0 + 1, cw = c.x1 - c.x0 + 1;
-    if(ch <= sp * 1.35 || ch > sp * 2.4 || cw > sp * 1.3 || bandOf(c.y0) === bandOf(c.y1)) return [c];
+    if(ch <= sp * 1.35 || ch > sp * 2.4 || c.x0 < st.x0 + sp * 1.2 || cw > sp * 1.3 || bandOf(c.y0) === bandOf(c.y1)) return [c];
     const parts = {};
     for(const q of c.px){
       const qx = q % w, qy = (q - qx) / w, b = bandOf(qy);
       const p = parts[b] || (parts[b] = {x0: qx, x1: qx, y0: qy, y1: qy, n: 0, px: []});
       p.n++; p.px.push(q); if(qx < p.x0) p.x0 = qx; if(qx > p.x1) p.x1 = qx; if(qy < p.y0) p.y0 = qy; if(qy > p.y1) p.y1 = qy;
     }
-    return Object.values(parts);
+    return Object.values(parts).filter(p => p.x1 - p.x0 + 1 >= sp * 0.45);
   };
   const comps = components(mm, w, Math.max(0, st.x0 - 4), by0, Math.min(w - 1, st.x1 + 4), by1)
     .flatMap(splitTall)
@@ -247,24 +247,24 @@ function looksLikeZero(g, G){
   const own = new Set(); for(const part of g.parts) for(const p of part.px) own.add(p);
   const W = gw + 2, H = gh + 2, bg = new Uint8Array(W * H).fill(1);
   for(const p of own){ const px = p % w, py = (p - px) / w; bg[(py - g.y0 + 1) * W + (px - g.x0 + 1)] = 0; }
-  const seen = new Uint8Array(W * H); let holes = 0, hy0 = 0, hy1 = 0;
+  const seen = new Uint8Array(W * H); let holes = 0, hy0 = 0, hy1 = 0, hx0 = 0, hx1 = 0;
   for(let i = 0; i < W * H; i++){
     if(!bg[i] || seen[i]) continue;
-    let touches = false, y0 = H, y1 = 0; const st = [i]; seen[i] = 1;
+    let touches = false, y0 = H, y1 = 0, x0h = W, x1h = 0; const st = [i]; seen[i] = 1;
     while(st.length){
       const q = st.pop(), x = q % W, y = (q - x) / W;
       if(x === 0 || y === 0 || x === W - 1 || y === H - 1) touches = true;
-      if(y < y0) y0 = y; if(y > y1) y1 = y;
+      if(y < y0) y0 = y; if(y > y1) y1 = y; if(x < x0h) x0h = x; if(x > x1h) x1h = x;
       for(const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
         const nx = x + dx, ny = y + dy; if(nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
         const r = ny * W + nx; if(bg[r] && !seen[r]){ seen[r] = 1; st.push(r); }
       }
     }
-    if(!touches){ holes++; hy0 = y0; hy1 = y1; }
+    if(!touches){ holes++; hy0 = y0; hy1 = y1;  hx0 = x0h; hx1 = x1h; }
   }
   if(holes !== 1) return false;
   const mid = ((hy0 + hy1) / 2 - 1) / gh, hh = (hy1 - hy0 + 1) / gh;
-  return mid > 0.35 && mid < 0.65 && hh > 0.4;
+  return mid > 0.35 && mid < 0.65 && hh > 0.4 && (hx1 - hx0 + 1) < (hy1 - hy0 + 1) * 0.9;
 }
 
 let _lastWords = [];
@@ -289,7 +289,7 @@ async function readGroups(A, G, onProgress){
     const r = await ocrGlyph(wk, c, wide ? ["7", "8", "13"] : ["10", "8", "7", "13"]);
     g.text = r.text; g.conf = r.conf;
     // OCR sometimes gives nothing for a clean "0": a tall oval with one centred hole is a zero
-    if(!g.text && looksLikeZero(g, G)){ g.text = "0"; g.conf = 50; }
+    if(!g.text && looksLikeZero(g, G)){ g.text = "0"; g.conf = 50; g.guess = true; }
     if(onProgress) onProgress(++i, A.groups.length);
   }
   // two-digit frets whose digits were read apart: "1" right next to a digit on the same string -> "12"
@@ -398,7 +398,7 @@ async function convertImage(src, opts){
       await readGroups(A, G, opts.onProgress);
       // six even lines with nothing readable on them (e.g. a fretboard diagram): not a tab
       // (a diagram has a few fret numbers under it, so require most marks on the lines to read as frets)
-      const nRead = A.groups.filter(g => /\d/.test(g.text || "")).length;
+      const nRead = A.groups.filter(g => /\d/.test(g.text || "") && !g.guess).length;
       if(nRead < Math.max(2, A.groups.length * 0.4)) continue;
       tabs.push({text: tabText(A, names), staff: st, groups: A.groups, bars: A.bars});
     }
