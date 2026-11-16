@@ -294,6 +294,10 @@ textarea.sheetedit{min-height:300px;font-family:var(--font-mono);font-size:14px;
 #dock .ctl .btn{padding:3px 8px;font-size:12px}
 #dock .st{padding:0 10px 8px;font-size:12px;color:var(--muted)}
 #dock .marks{padding:0 10px 10px}
+#dock iframe.sp{height:352px;min-height:0;max-height:none;background:transparent;border-radius:12px;margin:10px 0 8px}
+#dock .spb{padding:0 10px}
+.spres{display:flex;flex-direction:column;gap:6px;margin-top:4px}
+.spres button{text-align:start;justify-content:flex-start}
 button.mark{background:transparent;cursor:pointer;font:inherit;font-size:12px}
 button.mark:hover{background:var(--accent-soft)}
 .shot img{width:100%;display:block}
@@ -308,6 +312,7 @@ button.mark:hover{background:var(--accent-soft)}
 @media (max-width:700px){
   #dock{left:0;right:0;bottom:0;width:auto;border-radius:12px 12px 0 0;max-height:52vh}
   #dock iframe{height:calc(52vh - 120px);min-height:220px}
+  #dock iframe.sp{height:152px;min-height:0}
   body.dock-on:not(.dock-min) main{padding-bottom:52vh}
 }
 /* versions row: one Instagram tab with a version picker */
@@ -692,6 +697,7 @@ async function deleteSong(id){ S.songs.delete(id); if(S.db) await S.db.doc("song
 async function deletePending(id){ S.pending = S.pending.filter(p=>p.id!==id); if(S.db) await S.db.doc("pending/"+id).delete().catch(()=>{}); }
 
 async function init(){
+  spHandleRedirect(); // restores the song address at once; the token arrives in the background
   route();
   const timer = setTimeout(()=>{ if(!S.loaded){ S.offline=true; route(); } }, 10000);
   let db = null;
@@ -913,6 +919,7 @@ function openSongForm(song){
   const s = song || {title:"",artist:"",lang:"en",key:"",capo:0,bpm:"",timeSig:"4/4",strum:"",status:"want"};
   openDlg(song?"Edit song details":"Add song", `
     <form class="form" id="sf">
+      ${song?"":`<label class="wide">Paste a link (reel or Spotify)<input name="link" id="sfLink" dir="ltr" autocomplete="off" placeholder="https://www.instagram.com/reel/…  or  https://open.spotify.com/track/…"><small class="muted" id="sfLinkMsg" aria-live="polite"></small></label>`}
       <label class="wide">Title<input name="title" required value="${esc(s.title)}" dir="auto"></label>
       <label>Artist<input name="artist" value="${esc(s.artist||"")}" dir="auto"></label>
       <label>Key<input name="key" value="${esc(s.key||"")}" placeholder="e.g. G or Em"></label>
@@ -930,10 +937,39 @@ function openSongForm(song){
     const out = song ? Object.assign({}, song) : {id:uid(), sheets:[], sources:[], shots:[], notes:"", createdAt:new Date().toISOString()};
     for(const k of ["title","artist","key","strum","timeSig"]) out[k]=String(f.get(k)||"").trim();
     out.capo = +f.get("capo")||0; out.bpm = +f.get("bpm")||null;
+    if(!song){ const L=linkInfo(f.get("link")); if(L) out.sources=[{id:uid(), url:L.url, kind:L.kind, title:L.kind==="spotify"?($("#sfLink").dataset.sptitle||""):"", by:"", note:"", marks:[]}]; }
     out.lang = hasHeb(out.title) ? "he" : "en";
     closeDlg(); await saveSong(out);
     if(!song) location.hash="song-"+out.id; else route();
   };
+  const lk=$("#sfLink");
+  if(lk){
+    const msg=$("#sfLinkMsg"), tIn=$("#sf").elements.title, aIn=$("#sf").elements.artist;
+    let seq=0, t=null;
+    const fill=async()=>{
+      const my=++seq, L=linkInfo(lk.value); lk.dataset.sptitle="";
+      for(const el of [tIn,aIn]) if(el.dataset.auto){ el.value=""; delete el.dataset.auto; }
+      if(!lk.value.trim()){ msg.textContent=""; return; }
+      if(!L){ msg.textContent="Paste an Instagram reel or a Spotify song link."; return; }
+      if(L.kind!=="spotify"){
+        const c=codeOf({kind:L.kind, url:L.url}), dup=c && [...S.songs.values()].find(s=>(s.sources||[]).some(x=>codeOf(x)===c));
+        msg.textContent=(L.kind==="instagram"?"The reel":"The video")+" will be saved as a version of this song. Type the song's name."+(dup?" (It's already in “"+dup.title+"”.)":"");
+        return;
+      }
+      msg.textContent="Reading the song from Spotify…";
+      const info=await spInfo(L.url);
+      if(my!==seq) return;
+      if(!info){ msg.textContent="The Spotify link will be saved with the song. Type the name (Spotify didn't answer)."; return; }
+      lk.dataset.sptitle=info.title+(info.artist?" · "+info.artist:"");
+      if(!tIn.value.trim() || tIn.dataset.auto) { tIn.value=info.title; tIn.dataset.auto=1; }
+      if(info.artist && (!aIn.value.trim() || aIn.dataset.auto)){ aIn.value=info.artist; aIn.dataset.auto=1; }
+      msg.textContent=info.artist?"Filled from Spotify.":"Filled the name from Spotify. Type the artist.";
+    };
+    lk.addEventListener("input", ()=>{ clearTimeout(t); t=setTimeout(fill, 250); });
+    tIn.addEventListener("input", ()=>{ delete tIn.dataset.auto; });
+    aIn.addEventListener("input", ()=>{ delete aIn.dataset.auto; });
+    lk.focus();
+  }
   if(song) $("#delSong").onclick = async () => {
     const b=$("#delSong"); if(b.dataset.c){ closeDlg(); await deleteSong(song.id); location.hash="library"; toast("Song deleted"); }
     else { b.dataset.c=1; b.textContent="Click again to delete"; b.style.color="#c0392b"; }
@@ -1055,6 +1091,8 @@ function renderSong(v, id){
     el.addEventListener("input", ()=>{ st.textContent="Editing…"; clearTimeout(t); t=setTimeout(async()=>{ apply(el.value); await saveSong(song); st.textContent=S.db?"Saved":"Not saved: storage isn't available in this view"; }, 900); });
   }
   v.querySelectorAll("[data-srcver]").forEach(b=>b.onclick=()=>{ S.srcVer=b.dataset.srcver; S.sheetId=null; if(DK.songId!==song.id||DK.srcId!==S.srcVer) dockOpen(song, S.srcVer); route(); });
+  const spB=$("#spBtn"); if(spB) spB.onclick=()=>spotifyToggle(song);
+  if(S.spAfter && S.spAfter.song===song.id && !$("#dlg").open){ const a=S.spAfter; S.spAfter=null; openSpotifyDlg(song, a.act==="find"); }
   v.querySelectorAll("[data-versel]").forEach(sel=>sel.onchange=()=>{ S.srcVer=sel.value; S.sheetId=null; if(DK.songId!==song.id||DK.srcId!==S.srcVer) dockOpen(song, S.srcVer); route(); });
   v.querySelectorAll("[data-vview]").forEach(b=>b.onclick=()=>{ S.vview=b.dataset.vview; route(); });
   v.querySelectorAll("[data-analyze]").forEach(b=>b.onclick=()=>analyzeVersion(song, b.dataset.analyze, true));
@@ -1075,9 +1113,11 @@ function sheetTabsHTML(song, n, flats, heb){
   const ug = `https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(song.title+" "+(song.artist||""))}`;
   const t4u = `https://www.tab4u.com/resultsSimple?tab=songs&q=${encodeURIComponent(song.title)}`;
   const vs = videoVersions(song), selV = selVideo(song), owned = new Set(vs.map(x=>x.id));
+  const spOn = DK.kind==="spotify" && DK.songId===song.id;
+  const spBtn = `<button class="btn small" id="spBtn" aria-pressed="${spOn}" title="${spSrc(song)?(spOn?"Back to the video":"Play this song from Spotify"):"Link this song to Spotify"}">🎵 Spotify</button>`;
   if(!sheets.length && !vs.length) return `<section class="panel" style="margin-bottom:16px"><h2>Chords &amp; tabs</h2>
     <p class="empty-sheet" style="margin-top:0">No versions yet. Open the song on a chords site, select the whole page (Ctrl+A), copy it, and press <b>Add version</b>. Site menus and comments are removed for you.</p>
-    <div class="row"><a class="btn small" href="${ug}" target="_blank" rel="noopener">Find on Ultimate Guitar</a>${heb?`<a class="btn small" href="${t4u}" target="_blank" rel="noopener">Find on Tab4u</a>`:""}<button class="btn small primary" id="addSheet">+ Add version</button></div></section>`;
+    <div class="row">${spBtn}<a class="btn small" href="${ug}" target="_blank" rel="noopener">Find on Ultimate Guitar</a>${heb?`<a class="btn small" href="${t4u}" target="_blank" rel="noopener">Find on Tab4u</a>`:""}<button class="btn small primary" id="addSheet">+ Add version</button></div></section>`;
   // order: chords first, then tabs
   const texts = sheets.filter(x=>!owned.has(x.sourceId));
   const ordered = texts.filter(x=>x.kind!=="tab").concat(texts.filter(x=>x.kind==="tab"));
@@ -1087,14 +1127,14 @@ function sheetTabsHTML(song, n, flats, heb){
   const vtabs = vs.length ? `<div class="st vtab" role="tab" aria-selected="${!!selV}"><button class="btn small ghost" style="padding:2px 4px;font-weight:600" data-srcver="${esc(curV.id)}"><span class="vlab">▶ ${allIg?"Instagram":"Videos"}<small>${vs.length} version${vs.length>1?"s":""}</small></span></button>
       <select data-versel aria-label="Choose the video version">${vs.map((x,i)=>`<option value="${esc(x.id)}" ${x===curV?"selected":""}>${i+1}. ${esc(verLabel(x,i))}${x.kind==="youtube"?" (YouTube)":""}${(x.shots||[]).length?` · ${x.shots.length} 📷`:""}</option>`).join("")}</select></div>` : "";
   const addBtns = `<button class="btn small add" id="addSheet2">+ Add version</button><button class="btn small add" id="addShotsVer" title="A version made only of screenshots, with no video">+ Screenshots</button>`;
-  if(selV) return `<div class="sheettabs" role="tablist" aria-label="Versions">${vtabs}${ordered.map(sh=>`<button class="st" role="tab" data-sheet="${esc(sh.id)}" aria-selected="false">${sheetName(sheets, sh)}${sh.label?`<small dir="auto">${esc(sh.label)}</small>`:""}</button>`).join("")}${addBtns}</div>${videoPanelHTML(song, selV, n, flats)}`;
-  if(!ordered.length) return `<div class="sheettabs" role="tablist" aria-label="Versions">${vtabs}${addBtns}</div>`;
+  if(selV) return `<div class="sheettabs" role="tablist" aria-label="Versions">${vtabs}${spBtn}${ordered.map(sh=>`<button class="st" role="tab" data-sheet="${esc(sh.id)}" aria-selected="false">${sheetName(sheets, sh)}${sh.label?`<small dir="auto">${esc(sh.label)}</small>`:""}</button>`).join("")}${addBtns}</div>${videoPanelHTML(song, selV, n, flats)}`;
+  if(!ordered.length) return `<div class="sheettabs" role="tablist" aria-label="Versions">${vtabs}${spBtn}${addBtns}</div>`;
   const cur = ordered.find(x=>x.id===S.sheetId) || ordered[0];
   const rtl = cur.kind!=="tab" && (song.lang==="he" || hasHeb(cur.text));
   const nn = n + ((+cur.capo||0) - (+song.capo||0));
   const info = [cur.source, cur.kind!=="tab" ? ("written for "+((+cur.capo||0)?("capo "+cur.capo):"no capo")) : "", cur.tuning&&!/^E\s*A\s*D\s*G\s*B\s*E$/i.test(cur.tuning)?("tuning "+cur.tuning):""].filter(Boolean).join(" · ");
   return `<div class="sheettabs" role="tablist" aria-label="Versions">
-      ${vtabs}${ordered.map(sh=>`<button class="st" role="tab" data-sheet="${esc(sh.id)}" aria-selected="${sh===cur}">${sheetName(sheets, sh)}${sh.label?`<small dir="auto">${esc(sh.label)}</small>`:""}</button>`).join("")}
+      ${vtabs}${spBtn}${ordered.map(sh=>`<button class="st" role="tab" data-sheet="${esc(sh.id)}" aria-selected="${sh===cur}">${sheetName(sheets, sh)}${sh.label?`<small dir="auto">${esc(sh.label)}</small>`:""}</button>`).join("")}
       ${addBtns}
     </div>
     <section class="panel sheetpanel" role="tabpanel">
@@ -1453,6 +1493,27 @@ function capoHelpHTML(song){
 }
 const KINDS = {instagram:"Instagram", youtube:"YouTube", ug:"Ultimate Guitar", songsterr:"Songsterr", tab4u:"Tab4u", spotify:"Spotify", web:"Link"};
 function srcKind(url){ const u=String(url||"").toLowerCase(); return u.includes("instagram.com")?"instagram":(u.includes("youtu")?"youtube":u.includes("ultimate-guitar")?"ug":u.includes("songsterr")?"songsterr":u.includes("tab4u")?"tab4u":u.includes("spotify.com")?"spotify":"web"); }
+// ---- Spotify: a song's track is a normal source {kind:"spotify", url:"https://open.spotify.com/track/<id>"}
+function spId(url){ const m=/(?:open\.spotify\.com\/(?:intl-[\w-]+\/)?(?:embed\/)?track\/|spotify:track:)([A-Za-z0-9]{22})/.exec(String(url||"")); return m?m[1]:null; }
+function spSrc(song){ return (song.sources||[]).find(x=>x.kind==="spotify"&&spId(x.url)); }
+// a pasted link in Add song: reel, YouTube or Spotify track
+function linkInfo(raw){
+  const u=String(raw||"").trim(); if(!u) return null;
+  const sp=spId(u); if(sp) return {kind:"spotify", url:"https://open.spotify.com/track/"+sp};
+  if(/^https?:\/\//i.test(u) && igPath(u)) return {kind:"instagram", url:u};
+  if(/^https?:\/\//i.test(u) && /youtu/i.test(u) && ytId(u)) return {kind:"youtube", url:u};
+  return null;
+}
+// title + artist of a Spotify track: Web API when signed in, else the public oEmbed (title only)
+async function spInfo(url){
+  const id=spId(url); if(!id) return null;
+  try{ const t=await spApi("/tracks/"+id); if(t && t.name) return {title:t.name, artist:(t.artists||[]).map(a=>a.name).join(", ")}; }catch(e){}
+  try{
+    const r=await fetch("https://open.spotify.com/oembed?url="+encodeURIComponent("https://open.spotify.com/track/"+id));
+    if(r.ok){ const j=await r.json(); if(j && j.title) return {title:String(j.title), artist:String(j.author_name||"")}; }
+  }catch(e){}
+  return null;
+}
 function markUrl(src, t){
   if(src.kind==="instagram"){
     // opens the reel at that second and pauses: needs the Songbook Chrome extension
@@ -2253,6 +2314,162 @@ function dockOpen(song, srcId, pend){
       DK.loopT=setInterval(()=>{ if(DK.ytReady&&DK.a!==null&&DK.b!==null){ try{ if(DK.yt.getCurrentTime()>=DK.b) DK.yt.seekTo(DK.a,true); }catch(e){} } },120);
     });
   }
+}
+// ---- Spotify player in the dock (same place as the video)
+function spotifyToggle(song){
+  if(!spSrc(song)){ openSpotifyDlg(song); return; }
+  if(DK.kind==="spotify" && DK.songId===song.id){ dockBackToVideo(song); route(); return; }
+  dockSpotify(song); route();
+}
+function dockBackToVideo(song){
+  const vids=dockVideos(song), sv=selVideo(song);
+  if(vids.length) dockOpen(song, (sv&&vids.some(x=>x.id===sv.id)?sv:vids[0]).id);
+  else { dockTeardown(); DK.closed[song.id]=true; }
+}
+function dockSpotify(song){
+  const src=spSrc(song); if(!src) return;
+  dockTeardown();
+  DK.songId=song.id; DK.srcId=src.id; DK.kind="spotify"; DK.closed[song.id]=false;
+  const id=spId(src.url), vids=dockVideos(song), d=dockEl();
+  d.classList.toggle("min", DK.min);
+  d.innerHTML=`<div class="dh"><span class="tt" dir="auto">🎵 ${esc(src.title||song.title)}</span>
+      ${vids.length?`<button class="btn small" id="dkVid" title="Back to the video">▶ Video</button>`:""}
+      <button class="btn small ghost" id="dkMin" aria-label="Minimize">${DK.min?"▢":"–"}</button><button class="btn small ghost" id="dkX" aria-label="Close">✕</button></div>
+    <div class="dbody"><div class="spb">
+      <iframe class="sp" title="Spotify player" src="https://open.spotify.com/embed/track/${esc(id)}" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"></iframe>
+      <div class="st" style="padding:0 0 10px">Plays the whole song if you're signed in to Spotify in this browser, otherwise 30 seconds. <a href="https://open.spotify.com/track/${esc(id)}" target="_blank" rel="noopener">Open in Spotify</a> · <a href="#" id="dkSpChg">Change song</a></div>
+    </div></div>`;
+  d.classList.add("on");
+  document.body.classList.add("dock-on"); document.body.classList.toggle("dock-min", DK.min);
+  document.getElementById("dkMin").onclick=()=>{ DK.min=!DK.min; d.classList.toggle("min",DK.min); document.body.classList.toggle("dock-min", DK.min); document.getElementById("dkMin").textContent=DK.min?"▢":"–"; };
+  document.getElementById("dkX").onclick=()=>{ const sid=DK.songId; dockTeardown(); DK.closed[sid]=true; route(); };
+  const bv=document.getElementById("dkVid"); if(bv) bv.onclick=()=>{ dockBackToVideo(song); route(); };
+  document.getElementById("dkSpChg").onclick=e=>{ e.preventDefault(); openSpotifyDlg(song); };
+}
+// ---- Spotify dialog: paste a link, search on Spotify, or find automatically (needs a Client ID)
+async function setSpotify(song, url, title){
+  const id=spId(url); if(!id) return false;
+  song=S.songs.get(song.id)||song; // the newest copy, so older edits never overwrite newer ones
+  const clean="https://open.spotify.com/track/"+id;
+  const old=spSrc(song);
+  song.sources=(song.sources||[]).filter(x=>x!==old).concat([{id:old?old.id:uid(), url:clean, kind:"spotify", title:title||(old&&spId(old.url)===id?old.title:"")||"", by:"", note:"", marks:[]}]);
+  await saveSong(song); return true;
+}
+function openSpotifyDlg(song, autoFind){
+  const cur=spSrc(song), q=(song.title+" "+(song.artist||"")).trim();
+  openDlg("Spotify for this song", `
+    <form class="form" id="spf">
+      <label class="wide">Paste a Spotify link<input name="url" id="spUrl" dir="ltr" placeholder="https://open.spotify.com/track/…" value="${cur?esc(cur.url):""}"></label>
+      <div class="wide row" style="gap:6px">
+        <a class="btn small" href="https://open.spotify.com/search/${encodeURIComponent(q)}" target="_blank" rel="noopener">🔍 Search on Spotify</a>
+        ${spCid()?`<button type="button" class="btn small" id="spFind">✨ Find automatically</button>`:`<button type="button" class="btn small ghost" id="spSetup">Set up auto-find…</button>`}
+      </div>
+      <div class="wide" id="spRes" aria-live="polite"></div>
+      <div class="wide row" style="justify-content:space-between">
+        ${cur?`<button type="button" class="btn ghost" id="spDel">Remove Spotify link</button>`:"<span></span>"}
+        <button class="btn primary" type="submit">Save</button>
+      </div>
+    </form>`);
+  const res=$("#spRes");
+  $("#spf").onsubmit=async e=>{
+    e.preventDefault(); const url=$("#spUrl").value.trim();
+    if(!spId(url)){ res.innerHTML=`<p class="muted" style="margin:0">That isn't a Spotify song link. It should look like open.spotify.com/track/…</p>`; return; }
+    closeDlg(); await setSpotify(song, url); dockSpotify(song); route();
+  };
+  const del=$("#spDel"); if(del) del.onclick=async()=>{
+    if(!del.dataset.c){ del.dataset.c=1; del.textContent="Click again to remove"; return; }
+    song=S.songs.get(song.id)||song;
+    song.sources=(song.sources||[]).filter(x=>!(x.kind==="spotify"&&spId(x.url))); closeDlg();
+    if(DK.kind==="spotify" && DK.songId===song.id) dockBackToVideo(song);
+    await saveSong(song); route();
+  };
+  const su=$("#spSetup"); if(su) su.onclick=()=>openSpSetup(song);
+  const fb=$("#spFind"); if(fb) fb.onclick=()=>spFind(song, res, fb);
+  if(autoFind && fb) spFind(song, res, fb);
+}
+async function spFind(song, res, btn){
+  btn.disabled=true; res.innerHTML=`<p class="muted" style="margin:0">Searching…</p>`;
+  try{
+    const q=("track:"+song.title+(song.artist?" artist:"+song.artist:"")).replace(/["]/g,"");
+    let j=await spApi("/search?type=track&limit=5&q="+encodeURIComponent(q));
+    if(j && !(j.tracks&&j.tracks.items||[]).length) j=await spApi("/search?type=track&limit=5&q="+encodeURIComponent(song.title));
+    if(!j){ res.innerHTML=`<p class="muted" style="margin:0">Spotify needs you to sign in once.</p><button type="button" class="btn small primary" id="spLog">Sign in to Spotify</button>`; $("#spLog").onclick=()=>spLogin({song:song.id, act:"find"}); return; }
+    const items=(j.tracks&&j.tracks.items)||[];
+    if(!items.length){ res.innerHTML=`<p class="muted" style="margin:0">Nothing found. Try 🔍 Search on Spotify.</p>`; return; }
+    res.innerHTML=`<div class="spres">${items.map((t,i)=>`<button type="button" class="btn small" data-spi="${i}" dir="auto"><b>${esc(t.name)}</b>&nbsp;· ${esc((t.artists||[]).map(a=>a.name).join(", "))} <span class="muted">· ${esc(t.album&&t.album.name||"")}</span></button>`).join("")}</div>`;
+    res.querySelectorAll("[data-spi]").forEach(b=>b.onclick=async()=>{ const t=items[+b.dataset.spi]; closeDlg(); await setSpotify(song, "https://open.spotify.com/track/"+t.id, t.name+" · "+(t.artists||[]).map(a=>a.name).join(", ")); dockSpotify(song); route(); });
+  }catch(e){ res.innerHTML=`<p class="muted" style="margin:0">Search failed: ${esc(e.message)}</p>`; }
+  finally{ btn.disabled=false; }
+}
+function openSpSetup(song){
+  const here=location.origin+location.pathname, live="https://maayaningber-dotcom.github.io/songbook-test/app.html";
+  // Spotify accepts only https or 127.0.0.1 (not "localhost") as a redirect address
+  const uris=[...new Set([live].concat(/^https:|^http:\/\/127\.0\.0\.1[:\/]/.test(here)?[here]:[]))];
+  openDlg("Set up Spotify auto-find (once)", `
+    <form class="form" id="spsf">
+      <ol class="wide" style="margin:0;padding-inline-start:20px;line-height:1.6">
+        <li>Open <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">developer.spotify.com/dashboard</a> and sign in with your Spotify account.</li>
+        <li>Press <b>Create app</b>. Name and description: anything (e.g. Songbook).</li>
+        <li>Under <b>Redirect URIs</b> add ${uris.length>1?"both of these, one at a time":"this"}:${uris.map(u=>`<div class="mono" style="font-size:12px;user-select:all">${esc(u)}</div>`).join("")}</li>
+        <li>Tick <b>Web API</b>, accept the terms, press <b>Save</b>.</li>
+        <li>Open the app's <b>Settings</b>, copy the <b>Client ID</b> and paste it here. (No secret is needed.)</li>
+      </ol>
+      <label class="wide">Client ID<input name="cid" id="spCid" dir="ltr" class="mono" value="${esc(spCid())}" placeholder="32 letters and digits"></label>
+      <div class="wide row" style="justify-content:flex-end"><button class="btn primary" type="submit">Save</button></div>
+    </form>`);
+  $("#spsf").onsubmit=e=>{
+    e.preventDefault(); const v=$("#spCid").value.trim();
+    if(!/^[0-9a-f]{32}$/i.test(v)){ toast("A Client ID is 32 letters and digits"); return; }
+    try{ localStorage.setItem(SP_CID, v); localStorage.removeItem(SP_TOK); }catch(err){}
+    openSpotifyDlg(song, true);
+  };
+}
+// ---- Spotify sign-in: PKCE (no secret). Token lives in this browser only.
+const SP_CID="songbook-spotify-cid", SP_TOK="songbook-spotify-tok", SP_PK="songbook-spotify-pkce";
+function spCid(){ try{ return (localStorage.getItem(SP_CID)||"").trim(); }catch(e){ return ""; } }
+function spRedirect(){ return location.origin+location.pathname; }
+function b64url(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
+async function spLogin(after){
+  const v=b64url(crypto.getRandomValues(new Uint8Array(48))), st=b64url(crypto.getRandomValues(new Uint8Array(16)));
+  const ch=b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v)));
+  try{ sessionStorage.setItem(SP_PK, JSON.stringify({v, st, hash:location.hash, after})); }catch(e){ toast("This browser blocks storage, so Spotify sign-in can't work here."); return; }
+  location.href="https://accounts.spotify.com/authorize?"+new URLSearchParams({response_type:"code", client_id:spCid(), redirect_uri:spRedirect(), code_challenge_method:"S256", code_challenge:ch, state:st});
+}
+function spTokGet(){ try{ return JSON.parse(localStorage.getItem(SP_TOK)||"null"); }catch(e){ return null; } }
+async function spTokenReq(params){
+  const r=await fetch("https://accounts.spotify.com/api/token",{method:"POST", headers:{"Content-Type":"application/x-www-form-urlencoded"}, body:new URLSearchParams(params)});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error_description||j.error||("HTTP "+r.status));
+  const old=spTokGet()||{};
+  const t={access:j.access_token, refresh:j.refresh_token||old.refresh, exp:Date.now()+((+j.expires_in||3600)-60)*1000};
+  try{ localStorage.setItem(SP_TOK, JSON.stringify(t)); }catch(e){}
+  return t;
+}
+async function spAccess(){
+  const t=spTokGet(); if(!t||!t.access) return null;
+  if(Date.now()<t.exp) return t.access;
+  if(!t.refresh) return null;
+  try{ return (await spTokenReq({grant_type:"refresh_token", refresh_token:t.refresh, client_id:spCid()})).access; }
+  catch(e){ try{ localStorage.removeItem(SP_TOK); }catch(_){} return null; }
+}
+// null = not signed in (or the sign-in expired)
+async function spApi(path){
+  const a=await spAccess(); if(!a) return null;
+  const r=await fetch("https://api.spotify.com/v1"+path,{headers:{Authorization:"Bearer "+a}});
+  if(r.status===401){ try{ localStorage.removeItem(SP_TOK); }catch(e){} return null; }
+  if(r.status===403) throw new Error("Spotify refused (403). In the Spotify dashboard, check that your account is under the app's User Management.");
+  if(!r.ok) throw new Error("Spotify answered "+r.status);
+  return r.json();
+}
+// back from accounts.spotify.com with ?code=…&state=…
+async function spHandleRedirect(){
+  const q=new URLSearchParams(location.search); if(!q.has("state")) return;
+  let pk=null; try{ pk=JSON.parse(sessionStorage.getItem(SP_PK)||"null"); sessionStorage.removeItem(SP_PK); }catch(e){}
+  const code=q.get("code");
+  history.replaceState(null, "", location.pathname+((pk&&pk.hash)||""));
+  if(!pk || pk.st!==q.get("state") || !code){ toast(q.get("error")==="access_denied"?"Spotify sign-in was cancelled.":"Spotify sign-in didn't finish. Try again."); return; }
+  try{ await spTokenReq({grant_type:"authorization_code", code, redirect_uri:spRedirect(), client_id:spCid(), code_verifier:pk.v}); S.spAfter=pk.after||null; toast("Signed in to Spotify"); if(S.spAfter) route(); }
+  catch(e){ toast("Spotify sign-in failed: "+e.message); }
 }
 let _ytP=null;
 function ytLoad(){
