@@ -51,22 +51,44 @@ h1,h2,h3{font-family:var(--font-display);font-stretch:85%;text-wrap:balance;marg
 .tunerbtn{flex:none;background:transparent;border:0;cursor:pointer;font:inherit;padding:7px 12px;border-radius:999px;color:var(--muted);font-weight:500;white-space:nowrap}
 .tunerbtn:hover,.datamenu summary:hover{background:var(--accent-soft)}
 @media (max-width:520px){ .tunerbtn{padding:7px 8px} .tunerbtn .tl{display:none} }
-.tn-read{text-align:center;padding:6px 0 10px}
-.tn-note{font-size:44px;font-weight:700;line-height:1.1}
+.tn-top{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;margin-bottom:6px}
+.tn-top select{font:inherit;padding:5px 8px;border-radius:8px}
+.tn-auto{position:relative;display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;font-weight:500}
+.tn-auto input{position:absolute;opacity:0;pointer-events:none}
+.tn-auto i{width:38px;height:22px;border-radius:999px;background:var(--line);position:relative;transition:background .15s}
+.tn-auto i::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+.tn-auto input:checked + i{background:var(--accent)}
+.tn-auto input:checked + i::after{left:19px}
+.tn-auto input:focus-visible + i{outline:2px solid var(--accent);outline-offset:2px}
+.tn-gauge{position:relative;max-width:320px;margin:0 auto}
+.tn-gauge svg{display:block;width:100%;height:auto}
+.tn-arc{fill:none;stroke:var(--line);stroke-width:10;stroke-linecap:round}
+.tn-zone{fill:none;stroke:#1a8a3a;stroke-width:10;opacity:.55}
+.tn-tick{stroke:var(--muted);stroke-width:2}
+.tn-needle{transform-origin:120px 125px;transition:transform .08s linear;stroke:var(--accent);stroke-width:5;stroke-linecap:round}
+.tn-needle.ok{stroke:#1a8a3a}
+.tn-gauge .tn-read{position:absolute;left:0;right:0;bottom:2px;text-align:center}
+.tn-note{font-size:46px;font-weight:700;line-height:1}
+.tn-note small{font-size:18px;font-weight:500;color:var(--muted)}
 .tn-note.ok{color:#1a8a3a}
-.tn-sub{color:var(--muted);font-size:13px;min-height:18px}
-.tn-meter{position:relative;height:34px;margin:8px 0 4px;border-radius:8px;background:linear-gradient(90deg,rgba(200,60,40,.18),rgba(26,138,58,.25) 45%,rgba(26,138,58,.25) 55%,rgba(200,60,40,.18))}
-.tn-meter::before{content:"";position:absolute;left:50%;top:0;bottom:0;width:2px;background:var(--ink);opacity:.5}
-.tn-needle{position:absolute;top:3px;bottom:3px;width:6px;margin-left:-3px;border-radius:3px;background:var(--accent);left:50%;transition:left .08s linear}
-.tn-needle.ok{background:#1a8a3a}
-.tn-scale{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
-.tn-rows{display:flex;flex-direction:column;gap:6px;margin:12px 0}
-.tn-row{display:flex;align-items:center;gap:8px;padding:4px 8px;border:1px solid var(--line);border-radius:8px}
-.tn-row.on{border-color:var(--accent);background:var(--accent-soft)}
-.tn-row b{width:62px;font-weight:500;color:var(--muted);font-size:13px}
-.tn-row select{flex:1;min-width:0;font:inherit;padding:4px}
-.tn-row .tn-st{width:22px;text-align:center}
-.tn-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tn-sub{color:var(--muted);font-size:13px;min-height:18px;text-align:center;margin-top:6px}
+.tn-head{display:flex;align-items:center;justify-content:center;gap:6px;margin:10px 0}
+.tn-col{display:flex;flex-direction:column;gap:14px}
+.tn-peg{width:56px;height:56px;border-radius:50%;border:2px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;font-size:20px;font-weight:700;cursor:pointer;position:relative;padding:0}
+.tn-peg:hover{border-color:var(--accent)}
+.tn-peg.on{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 0 0 3px var(--accent-soft)}
+.tn-peg.ok{border-color:#1a8a3a;background:#1a8a3a;color:#fff}
+.tn-pw{position:relative}
+.tn-pw .pl{position:absolute;right:-12px;top:-12px;width:28px;height:28px;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--muted);font-size:13px;line-height:26px;text-align:center;padding:0;cursor:pointer}
+.tn-pw .pl:hover{color:var(--accent);border-color:var(--accent)}
+.tn-headsvg{width:120px;height:auto;flex:none}
+.tn-headsvg .hs{fill:var(--accent-soft);stroke:var(--muted);stroke-width:2}
+.tn-headsvg .st{stroke:var(--muted);stroke-width:1.5}
+.tn-headsvg .st.on{stroke:var(--accent);stroke-width:3}
+.tn-edit{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0}
+.tn-edit label{display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:2px}
+.tn-edit select{font:inherit;padding:4px}
+.tn-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center}
 .datamenu>div{position:absolute;right:0;top:100%;z-index:60;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:6px;display:flex;flex-direction:column;min-width:150px;box-shadow:0 6px 20px rgba(0,0,0,.15)}
 .datamenu>div a{padding:8px 12px;text-decoration:none;color:var(--ink);white-space:nowrap;border-radius:6px}
 .datamenu>div a:hover{background:var(--bg)}
@@ -2015,32 +2037,63 @@ function tnPitch(buf, sr){
   return sr/(tau+Math.max(-1,Math.min(1,shift)));
 }
 
-function tunerRowsHTML(){
-  const opts = sel => { let h=""; for(let m=28;m<=76;m++) h+=`<option value="${m}"${m===sel?" selected":""}>${tnName(m)}</option>`; return h; };
-  return TN.tune.map((m,i)=>i).reverse().map(i=>`<div class="tn-row${TN.lock===i?" on":""}" data-tnrow="${i}">
-      <b title="Click to tune only this string">${6-i}${["st","nd","rd","th","th","th"][5-i]} string</b>
-      <select data-tnsel="${i}" aria-label="Note for string ${6-i}">${opts(TN.tune[i])}</select>
-      <button type="button" class="btn small ghost" data-tnplay="${i}" title="Play this note">♪</button>
-      <span class="tn-st" id="tnSt${i}">${TN.ok[i]?"✓":""}</span></div>`).join("");
-}
+const tnPc = m => TN_NOTE[((m%12)+12)%12];
+const tnOrd = i => (6-i)+["st","nd","rd","th","th","th"][5-i];
+function tnSel(){ return TN.lock>=0 ? TN.lock : (TN.si==null?-1:TN.si); }
 function tunerPresetVal(){ const p=TN_PRESETS.find(([,t])=>t.every((m,i)=>m===TN.tune[i])); return p?p[0]:""; }
+function tunerTopHTML(){
+  const pv=tunerPresetVal();
+  return `<select id="tnPreset" aria-label="Tuning"><option value="">${pv?"":"Custom"}</option>${TN_PRESETS.map(([n])=>`<option${n===pv?" selected":""}>${n}</option>`).join("")}</select>
+    <button type="button" class="btn small ghost" id="tnEditBtn" title="Set your own notes" aria-label="Custom notes" aria-expanded="${TN.edit?"true":"false"}">✏️</button>
+    <label class="tn-auto" title="Auto: the tuner finds the string by itself"><input type="checkbox" id="tnAuto"${TN.lock<0?" checked":""}><i></i>Auto</label>`;
+}
+function tunerHeadHTML(){
+  const sel=tnSel();
+  const peg=i=>`<div class="tn-pw"><button type="button" class="tn-peg${sel===i?" on":""}${TN.ok[i]?" ok":""}" data-tnpeg="${i}" aria-label="${tnOrd(i)} string ${tnName(TN.tune[i])}" title="${tnOrd(i)} string (${tnName(TN.tune[i])}). Tap to tune only this string" aria-pressed="${TN.lock===i}">${tnPc(TN.tune[i])}</button><button type="button" class="pl" data-tnplay="${i}" aria-label="Play ${tnName(TN.tune[i])}" title="Play this note">♪</button></div>`;
+  const lines=TN.tune.map((m,i)=>{ const x=34+i*10.4; return `<line class="st${sel===i?" on":""}" data-tnst="${i}" x1="${x}" y1="14" x2="${x}" y2="196"/>`; }).join("");
+  return `<div class="tn-col">${[2,1,0].map(peg).join("")}</div>
+    <svg class="tn-headsvg" viewBox="0 0 120 200" aria-hidden="true"><path class="hs" d="M26 20 Q60 2 94 20 L100 118 L88 200 L32 200 L20 118 Z"/>${lines}</svg>
+    <div class="tn-col">${[3,4,5].map(peg).join("")}</div>`;
+}
+function tunerEditHTML(){
+  if(!TN.edit) return "";
+  const opts = sel => { let h=""; for(let m=28;m<=76;m++) h+=`<option value="${m}"${m===sel?" selected":""}>${tnName(m)}</option>`; return h; };
+  return `<div class="tn-edit">${[0,1,2,3,4,5].map(i=>`<label>${tnOrd(i)} string<select data-tnsel="${i}">${opts(TN.tune[i])}</select></label>`).join("")}</div>`;
+}
 function tunerTools(){
   const song=curSong(), st=song&&tnParse(song.tuning);
-  const pv=tunerPresetVal();
-  return `<select id="tnPreset" aria-label="Preset tuning"><option value="">${pv?"":"Custom"}</option>${TN_PRESETS.map(([n,t])=>`<option${n===pv?" selected":""}>${n}</option>`).join("")}</select>
-    ${st && st.some((m,i)=>m!==TN.tune[i]) ? `<button type="button" class="btn small" id="tnSong">Use this song's tuning (${esc(song.tuning)})</button>`:""}
-    <span class="muted" style="font-size:12px">Click a string's name to tune only that string. Click it again for automatic.</span>`;
+  return st && st.some((m,i)=>m!==TN.tune[i]) ? `<button type="button" class="btn small" id="tnSong">Use this song's tuning (${esc(song.tuning)})</button>` : "";
 }
-function tunerRedraw(){ const r=$("#tnRows"), t=$("#tnTools"); if(r) r.innerHTML=tunerRowsHTML(); if(t) t.innerHTML=tunerTools(); }
-function tunerSet(t){ TN.tune=t.slice(); TN.ok=[0,0,0,0,0,0]; TN.hist=[]; tnSave(TN.tune); tunerRedraw(); }
+function tnResetRead(){
+  const n=$("#tnNote"), d=$("#tnNeedle"), u=$("#tnSub");
+  if(n){ n.textContent="–"; n.classList.remove("ok"); }
+  if(d){ d.style.transform=""; d.classList.remove("ok"); }
+  if(u && TN.an) u.textContent="Play one string";
+  TN.okRun=0;
+}
+function tunerRedraw(){
+  const ae=document.activeElement, sel=ae&&ae.closest&&ae.closest("#dlgBody")?(ae.id?"#"+ae.id:ae.dataset.tnpeg!=null?'[data-tnpeg="'+ae.dataset.tnpeg+'"]':ae.dataset.tnplay!=null?'[data-tnplay="'+ae.dataset.tnplay+'"]':ae.dataset.tnsel!=null?'[data-tnsel="'+ae.dataset.tnsel+'"]':""):"";
+  const m={tnTop:tunerTopHTML, tnHead:tunerHeadHTML, tnEdit:tunerEditHTML, tnTools:tunerTools};
+  for(const k in m){ const e=$("#"+k); if(e) e.innerHTML=m[k](); }
+  if(sel){ const f=document.querySelector("#dlgBody "+sel); if(f) f.focus(); }
+}
+function tunerSet(t){ TN.tune=t.slice(); TN.ok=[0,0,0,0,0,0]; TN.hist=[]; tnSave(TN.tune); tnResetRead(); tunerRedraw(); }
+function tunerGaugeHTML(){
+  const P=(a,r)=>{ const q=a*Math.PI/180; return [(120+r*Math.sin(q)).toFixed(2),(125-r*Math.cos(q)).toFixed(2)]; };
+  const arc=(a0,a1)=>{ const [x0,y0]=P(a0,100), [x1,y1]=P(a1,100); return `M${x0} ${y0} A100 100 0 0 1 ${x1} ${y1}`; };
+  let ticks=""; for(const c of [-50,-25,0,25,50]){ const a=c/50*70, [x0,y0]=P(a,86), [x1,y1]=P(a,76); ticks+=`<line class="tn-tick" x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}"/>`; }
+  return `<svg viewBox="0 0 240 134" aria-hidden="true"><path class="tn-arc" d="${arc(-70,70)}"/><path class="tn-zone" d="${arc(-7,7)}"/>${ticks}<line class="tn-needle" id="tnNeedle" x1="120" y1="63" x2="120" y2="27"/></svg>
+    <div class="tn-read"><div class="tn-note" id="tnNote">–</div></div>`;
+}
 
 async function openTuner(){
   tunerStop();
-  TN = { tune: tnLoad(), lock:-1, hist:[], okRun:0, ok:[0,0,0,0,0,0] };
-  openDlg("Tuner", `<div class="tn-read"><div class="tn-note" id="tnNote">–</div><div class="tn-sub" id="tnSub">Starting the microphone…</div></div>
-    <div class="tn-meter"><div class="tn-needle" id="tnNeedle"></div></div>
-    <div class="tn-scale"><span>♭ −50</span><span>0</span><span>+50 ♯</span></div>
-    <div class="tn-rows" id="tnRows">${tunerRowsHTML()}</div>
+  TN = { tune: tnLoad(), lock:-1, hist:[], okRun:0, ok:[0,0,0,0,0,0], edit:false };
+  openDlg("Tuner", `<div class="tn-top" id="tnTop">${tunerTopHTML()}</div>
+    <div id="tnEdit">${tunerEditHTML()}</div>
+    <div class="tn-gauge">${tunerGaugeHTML()}</div>
+    <div class="tn-sub" id="tnSub">Starting the microphone…</div>
+    <div class="tn-head" id="tnHead">${tunerHeadHTML()}</div>
     <div class="tn-tools" id="tnTools">${tunerTools()}</div>
     <p class="help">The sound is analysed on this computer and never saved. Your tuning is remembered in this browser.</p>`);
   const body=$("#dlgBody");
@@ -2048,13 +2101,15 @@ async function openTuner(){
     const s=e.target.closest("[data-tnsel]");
     if(s){ const t=TN.tune.slice(); t[+s.dataset.tnsel]=+s.value; tunerSet(t); return; }
     if(e.target.id==="tnPreset" && e.target.value){ const p=TN_PRESETS.find(([n])=>n===e.target.value); if(p) tunerSet(p[1]); }
+    if(e.target.id==="tnAuto"){ TN.lock = e.target.checked ? -1 : (TN.si>=0 ? TN.si : 0); TN.hist=[]; tnResetRead(); tunerRedraw(); }
   };
   body.onclick = e => {
     const p=e.target.closest("[data-tnplay]");
     if(p){ tnTone(TN.tune[+p.dataset.tnplay]); return; }
     if(e.target.id==="tnSong"){ const t=tnParse((curSong()||{}).tuning); if(t) tunerSet(t); return; }
-    const b=e.target.closest(".tn-row b");
-    if(b){ const i=+b.parentElement.dataset.tnrow; TN.lock = TN.lock===i ? -1 : i; TN.hist=[]; tunerRedraw(); }
+    if(e.target.closest("#tnEditBtn")){ TN.edit=!TN.edit; tunerRedraw(); return; }
+    const b=e.target.closest("[data-tnpeg]");
+    if(b){ const i=+b.dataset.tnpeg; TN.lock = TN.lock===i ? -1 : i; TN.hist=[]; tnResetRead(); tunerRedraw(); }
   };
   $("#dlg").addEventListener("close", tunerStop, {once:true});
   const me=TN;
@@ -2071,6 +2126,11 @@ async function openTuner(){
   }catch(err){
     const s=$("#tnSub"); if(s) s.textContent = err && err.name==="NotAllowedError" ? "Microphone blocked. Allow it from the 🔒 icon in the address bar and open the tuner again." : "No microphone found ("+(err&&err.message||err)+")";
   }
+}
+
+function tnMarkSel(si){
+  document.querySelectorAll("[data-tnpeg]").forEach(b=>b.classList.toggle("on", +b.dataset.tnpeg===si));
+  document.querySelectorAll("[data-tnst]").forEach(l=>l.classList.toggle("on", +l.dataset.tnst===si));
 }
 
 function tunerStop(){
@@ -2100,17 +2160,17 @@ function tunerTick(){
   // which string: the locked one, or the one whose target is nearest
   let si=TN.lock;
   if(si<0){ let bd=1e9; TN.tune.forEach((m,i)=>{ const dd=Math.abs(midiF-m); if(dd<bd){ bd=dd; si=i; } }); }
-  if(TN.si!==si){ TN.si=si; TN.hist=[]; document.querySelectorAll(".tn-row").forEach(r=>r.classList.toggle("on", +r.dataset.tnrow===si)); }
+  if(TN.si!==si){ TN.si=si; TN.hist=[]; tnMarkSel(si); }
   TN.hist.push(midiF); if(TN.hist.length>5) TN.hist.shift();
   const sm=TN.hist.slice().sort((a,b)=>a-b)[TN.hist.length>>1];
   const target=TN.tune[si], cents=(sm-target)*100, ok=Math.abs(cents)<=5;
-  note.textContent=tnName(target); note.classList.toggle("ok", ok);
-  nd.style.left=(50+Math.max(-50,Math.min(50,cents)))+"%"; nd.classList.toggle("ok", ok);
+  note.innerHTML=tnPc(target)+"<small>"+(Math.floor(target/12)-1)+"</small>"; note.classList.toggle("ok", ok);
+  nd.style.transform="rotate("+(Math.max(-50,Math.min(50,cents))/50*70)+"deg)"; nd.classList.toggle("ok", ok);
   const heard=tnName(Math.round(sm));
-  sub.textContent = `${6-si}${["st","nd","rd","th","th","th"][5-si]} string · hearing ${heard} (${(440*Math.pow(2,(sm-69)/12)).toFixed(1)} Hz) · ` +
+  sub.textContent = `${tnOrd(si)} string · hearing ${heard} (${(440*Math.pow(2,(sm-69)/12)).toFixed(1)} Hz) · ` +
     (ok ? "in tune ✓" : (cents<0 ? "too low, tighten" : "too high, loosen") + ` (${cents>0?"+":""}${Math.round(cents)} cents)`);
   TN.okRun = ok ? TN.okRun+1 : 0;
-  if(TN.okRun>=6 && !TN.ok[si]){ TN.ok[si]=1; const e=$("#tnSt"+si); if(e) e.textContent="✓"; }
+  if(TN.okRun>=6 && !TN.ok[si]){ TN.ok[si]=1; const e=document.querySelector('[data-tnpeg="'+si+'"]'); if(e) e.classList.add("ok"); }
 }
 $("#tunerBtn").onclick = openTuner;
 
